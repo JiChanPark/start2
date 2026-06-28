@@ -375,6 +375,60 @@ button {
   grid-template-columns: minmax(240px, 1fr) minmax(120px, 240px) auto;
 }
 
+.managedStudentRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.studentRowMain {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(120px, 240px) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.studentActionGroup {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.formActions {
+  justify-content: flex-start;
+}
+
+.dangerButton {
+  border: 0;
+  min-height: 42px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #f6dfda;
+  color: var(--red);
+  font-weight: 900;
+}
+
+.dangerButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(189, 71, 60, 0.16);
+}
+
+.editStudentPanel {
+  border-color: rgba(199, 139, 45, 0.26);
+}
+
+.editStudentForm {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .studentRow small {
   display: block;
   margin-top: 6px;
@@ -1056,13 +1110,19 @@ button {
   }
 
   .studentRow,
+  .studentRowMain,
   .missionItem,
   .noteComposer,
   .studentForm,
+  .editStudentForm,
   .topbar,
   .profileHeader {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .studentActionGroup {
+    justify-content: flex-start;
   }
 
   .calendarDay {

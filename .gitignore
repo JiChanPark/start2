@@ -6,3 +6,5 @@ dist
 *.log
 research-intern-mvp-dist.zip
 .vercel
+
+.vercel

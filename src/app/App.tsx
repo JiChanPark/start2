@@ -11,7 +11,6 @@ import {
   History,
   LogOut,
   MessageSquareText,
-  RotateCcw,
   Sparkles,
   Users,
   X,
@@ -33,6 +32,10 @@ interface CreateStudentInput {
   mentorName: string;
   internshipStartDate: string;
   internshipEndDate: string;
+}
+
+interface UpdateStudentInput extends CreateStudentInput {
+  status: StudentProfile["status"];
 }
 
 const today = todayKey();
@@ -223,6 +226,56 @@ export function App() {
     setView("student-detail");
   };
 
+  const updateStudent = (studentId: string, input: UpdateStudentInput) => {
+    const student = data.students.find((item) => item.id === studentId);
+    if (!student) return;
+
+    const nextData: AppData = {
+      ...data,
+      users: data.users.map((user) =>
+        user.id === student.userId
+          ? { ...user, email: input.email, name: input.name, role: input.role }
+          : user,
+      ),
+      students: data.students.map((item) =>
+        item.id === studentId
+          ? {
+              ...item,
+              affiliation: input.affiliation,
+              major: input.major,
+              mentorName: input.mentorName,
+              internshipStartDate: input.internshipStartDate,
+              internshipEndDate: input.internshipEndDate,
+              status: input.status,
+            }
+          : item,
+      ),
+    };
+    repository.save(nextData);
+    setData(nextData);
+  };
+
+  const deleteStudent = (studentId: string) => {
+    const student = data.students.find((item) => item.id === studentId);
+    if (!student) return;
+
+    const nextStudents = data.students.filter((item) => item.id !== studentId);
+    const nextSelectedStudentId = selectedStudentId === studentId ? nextStudents[0]?.id ?? null : selectedStudentId;
+    const nextData: AppData = {
+      ...data,
+      users: data.users.filter((user) => user.id !== student.userId),
+      students: nextStudents,
+      assignments: data.assignments.filter((assignment) => assignment.studentId !== studentId),
+      reflections: data.reflections.filter((reflection) => reflection.studentId !== studentId),
+      mentorNotes: data.mentorNotes.filter((note) => note.studentId !== studentId),
+      weeklyReports: data.weeklyReports.filter((report) => report.studentId !== studentId),
+    };
+    repository.save(nextData);
+    setData(nextData);
+    setSelectedStudentId(nextSelectedStudentId);
+    if (!nextSelectedStudentId) setView("students");
+  };
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -286,15 +339,6 @@ export function App() {
         </nav>
 
         <div className="sidebarFooter">
-          <button
-            className="ghostButton"
-            onClick={() => {
-              setData(repository.reset());
-              setSelectedStudentId("s-001");
-            }}
-          >
-            <RotateCcw size={16} /> 데모 초기화
-          </button>
           <button className="ghostButton" onClick={() => setCurrentUser(null)}>
             <LogOut size={16} /> 로그아웃
           </button>
@@ -335,6 +379,8 @@ export function App() {
           <StudentList
             data={data}
             onCreateStudent={createStudent}
+            onUpdateStudent={updateStudent}
+            onDeleteStudent={deleteStudent}
             onSelect={(id) => {
               setSelectedStudentId(id);
               setView("student-detail");
@@ -716,8 +762,20 @@ function AdminDashboard({
   );
 }
 
-function StudentList({ data, onSelect, onCreateStudent }: { data: AppData; onSelect: (id: string) => void; onCreateStudent: (input: CreateStudentInput) => void }) {
-  const [form, setForm] = useState<CreateStudentInput>({
+function StudentList({
+  data,
+  onSelect,
+  onCreateStudent,
+  onUpdateStudent,
+  onDeleteStudent,
+}: {
+  data: AppData;
+  onSelect: (id: string) => void;
+  onCreateStudent: (input: CreateStudentInput) => void;
+  onUpdateStudent: (studentId: string, input: UpdateStudentInput) => void;
+  onDeleteStudent: (studentId: string) => void;
+}) {
+  const emptyForm: CreateStudentInput = {
     name: "",
     email: "",
     role: "INTERN",
@@ -726,8 +784,28 @@ function StudentList({ data, onSelect, onCreateStudent }: { data: AppData; onSel
     mentorName: "오경희",
     internshipStartDate: today,
     internshipEndDate: today,
-  });
+  };
+  const [form, setForm] = useState<CreateStudentInput>(emptyForm);
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<UpdateStudentInput>({ ...emptyForm, status: "ACTIVE" });
   const canCreate = Boolean(form.name.trim() && form.email.trim() && form.affiliation.trim() && form.major.trim());
+  const canUpdate = Boolean(editForm.name.trim() && editForm.email.trim() && editForm.affiliation.trim() && editForm.major.trim());
+
+  const startEdit = (student: StudentProfile) => {
+    const user = getUser(data, student);
+    setEditingStudentId(student.id);
+    setEditForm({
+      name: user.name,
+      email: user.email,
+      role: user.role === "GRAD_STUDENT" ? "GRAD_STUDENT" : "INTERN",
+      affiliation: student.affiliation,
+      major: student.major,
+      mentorName: student.mentorName,
+      internshipStartDate: student.internshipStartDate,
+      internshipEndDate: student.internshipEndDate,
+      status: student.status,
+    });
+  };
 
   return (
     <div className="stack">
@@ -750,22 +828,51 @@ function StudentList({ data, onSelect, onCreateStudent }: { data: AppData; onSel
             disabled={!canCreate}
             onClick={() => {
               onCreateStudent(form);
-              setForm({
-                name: "",
-                email: "",
-                role: "INTERN",
-                affiliation: "",
-                major: "",
-                mentorName: "오경희",
-                internshipStartDate: today,
-                internshipEndDate: today,
-              });
+              setForm(emptyForm);
             }}
           >
             <CheckCircle2 size={16} /> 학생 추가
           </button>
         </div>
       </section>
+
+      {editingStudentId && (
+        <section className="panel editStudentPanel">
+          <SectionTitle icon={<Users size={18} />} title="학생 정보 수정" />
+          <div className="studentForm editStudentForm">
+            <input placeholder="이름" value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
+            <input placeholder="이메일" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} />
+            <select value={editForm.role} onChange={(event) => setEditForm({ ...editForm, role: event.target.value as UpdateStudentInput["role"] })}>
+              <option value="GRAD_STUDENT">학연생</option>
+              <option value="INTERN">인턴</option>
+            </select>
+            <select value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value as StudentProfile["status"] })}>
+              <option value="ACTIVE">진행 중</option>
+              <option value="PAUSED">일시 중지</option>
+              <option value="COMPLETED">수료</option>
+            </select>
+            <input placeholder="소속" value={editForm.affiliation} onChange={(event) => setEditForm({ ...editForm, affiliation: event.target.value })} />
+            <input placeholder="전공" value={editForm.major} onChange={(event) => setEditForm({ ...editForm, major: event.target.value })} />
+            <input placeholder="멘토명" value={editForm.mentorName} onChange={(event) => setEditForm({ ...editForm, mentorName: event.target.value })} />
+            <input type="date" value={editForm.internshipStartDate} onChange={(event) => setEditForm({ ...editForm, internshipStartDate: event.target.value })} />
+            <input type="date" value={editForm.internshipEndDate} onChange={(event) => setEditForm({ ...editForm, internshipEndDate: event.target.value })} />
+            <div className="studentActionGroup formActions">
+              <button
+                className="primaryButton"
+                disabled={!canUpdate}
+                onClick={() => {
+                  onUpdateStudent(editingStudentId, editForm);
+                  setEditingStudentId(null);
+                }}
+              >
+                저장
+              </button>
+              <button className="secondaryButton" onClick={() => setEditingStudentId(null)}>취소</button>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="panel">
         <SectionTitle icon={<Users size={18} />} title="학생 목록" />
         <div className="studentRows">
@@ -774,15 +881,29 @@ function StudentList({ data, onSelect, onCreateStudent }: { data: AppData; onSel
             const progress = getProgress(data, student.id);
             const reasons = getRiskReasons(data, student.id);
             return (
-              <button className="studentRow expanded" key={student.id} onClick={() => onSelect(student.id)}>
-                <div>
-                  <strong>{user.name}</strong>
-                  <span>{student.mentorName} 멘토 · {student.internshipStartDate} 시작</span>
-                  <small>{reasons.length ? reasons.join(" · ") : "오늘 흐름 양호"}</small>
+              <article className="studentRow expanded managedStudentRow" key={student.id}>
+                <button className="studentRowMain" onClick={() => onSelect(student.id)}>
+                  <div>
+                    <strong>{user.name}</strong>
+                    <span>{student.mentorName} 멘토 · {student.internshipStartDate} 시작</span>
+                    <small>{reasons.length ? reasons.join(" · ") : "오늘 흐름 양호"}</small>
+                  </div>
+                  <ProgressBar value={progress.rate} />
+                  <span className="roleBadge">{student.status}</span>
+                </button>
+                <div className="studentActionGroup">
+                  <button className="secondaryButton" onClick={() => startEdit(student)}>수정</button>
+                  <button
+                    className="dangerButton"
+                    onClick={() => {
+                      const confirmed = window.confirm(user.name + " 학생과 관련 기록을 삭제할까요? 이 작업은 되돌릴 수 없습니다.");
+                      if (confirmed) onDeleteStudent(student.id);
+                    }}
+                  >
+                    삭제
+                  </button>
                 </div>
-                <ProgressBar value={progress.rate} />
-                <span className="roleBadge">{student.status}</span>
-              </button>
+              </article>
             );
           })}
         </div>
