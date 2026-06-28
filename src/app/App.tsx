@@ -351,7 +351,14 @@ export function App() {
           />
         )}
         {!isStaff && currentStudent && view === "student-home" && (
-          <StudentHome data={data} student={currentStudent} onUpdateAssignment={updateAssignment} />
+          <StudentHome
+            data={data}
+            student={currentStudent}
+            currentUser={currentUser}
+            onUpdateAssignment={updateAssignment}
+            onSaveMeetingNotice={saveMeetingNotice}
+            onDeleteMeetingNotice={deleteMeetingNotice}
+          />
         )}
         {!isStaff && currentStudent && view === "reflection" && (
           <ReflectionEditor data={data} student={currentStudent} onSave={saveReflection} />
@@ -532,32 +539,38 @@ function MeetingNoticePanel({
     pinned: true,
   });
   const canSave = Boolean(form.title.trim() && form.meetingDate && form.startTime && form.location.trim());
+  const canManageAll = currentUser ? isStaffRole(currentUser.role) : false;
 
   return (
     <section className="panel meetingPanel">
-      <SectionTitle icon={<CalendarDays size={18} />} title="주간 회의 일정 공지" />
+      <SectionTitle icon={<CalendarDays size={18} />} title="주간 회의 일정 공유" />
       <div className="noticeGrid">
         <div className="noticeList">
-          {upcomingNotices.length ? upcomingNotices.map((notice) => (
-            <article className={notice.pinned ? "noticeCard pinnedNotice" : "noticeCard"} key={notice.id}>
-              <div>
-                <span className="noticeDate">{formatDate(notice.meetingDate)} · {notice.startTime} - {notice.endTime}</span>
-                <h3>{notice.title}</h3>
-                <p><b>장소:</b> {notice.location}</p>
-                <p>{notice.agenda}</p>
-              </div>
-              {editable && (
-                <button className="secondaryButton" onClick={() => onDelete?.(notice.id)}>
-                  삭제
-                </button>
-              )}
-            </article>
-          )) : <p className="empty">아직 공유된 주간 회의 일정이 없습니다.</p>}
+          {upcomingNotices.length ? upcomingNotices.map((notice) => {
+            const author = currentUser?.id === notice.createdBy ? currentUser : undefined;
+            const canDelete = editable && (canManageAll || currentUser?.id === notice.createdBy);
+            return (
+              <article className={notice.pinned ? "noticeCard pinnedNotice" : "noticeCard"} key={notice.id}>
+                <div>
+                  <span className="noticeDate">{formatDate(notice.meetingDate)} · {notice.startTime} - {notice.endTime}</span>
+                  <h3>{notice.title}</h3>
+                  <p><b>장소:</b> {notice.location}</p>
+                  <p>{notice.agenda}</p>
+                  <small className="noticeMeta">{author ? `${author.name} 신청` : "공유된 일정"}</small>
+                </div>
+                {canDelete && (
+                  <button className="secondaryButton" onClick={() => onDelete?.(notice.id)}>
+                    삭제
+                  </button>
+                )}
+              </article>
+            );
+          }) : <p className="empty">아직 공유된 주간 회의 일정이 없습니다.</p>}
         </div>
 
         {editable && currentUser && (
           <div className="noticeComposer">
-            <strong>새 회의 공지 작성</strong>
+            <strong>{canManageAll ? "새 회의 공지 작성" : "회의 일정 신청"}</strong>
             <input placeholder="회의 제목" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
             <div className="noticeTimeGrid">
               <input type="date" value={form.meetingDate} onChange={(event) => setForm({ ...form, meetingDate: event.target.value })} />
@@ -571,10 +584,12 @@ function MeetingNoticePanel({
               onChange={(event) => setForm({ ...form, agenda: event.target.value })}
               rows={4}
             />
-            <label className="pinToggle">
-              <input type="checkbox" checked={form.pinned} onChange={(event) => setForm({ ...form, pinned: event.target.checked })} />
-              상단 고정 공지
-            </label>
+            {canManageAll && (
+              <label className="pinToggle">
+                <input type="checkbox" checked={form.pinned} onChange={(event) => setForm({ ...form, pinned: event.target.checked })} />
+                상단 고정 공유
+              </label>
+            )}
             <button
               className="primaryButton"
               disabled={!canSave}
@@ -590,7 +605,7 @@ function MeetingNoticePanel({
                   createdBy: currentUser.id,
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
-                  pinned: form.pinned,
+                  pinned: canManageAll ? form.pinned : false,
                 });
                 setForm({
                   title: "주간 인턴 성장 회의",
@@ -603,7 +618,7 @@ function MeetingNoticePanel({
                 });
               }}
             >
-              회의 공지 공유
+              {canManageAll ? "회의 공지 공유" : "회의 일정 신청"}
             </button>
           </div>
         )}
@@ -948,11 +963,31 @@ function StudentDetail({
   );
 }
 
-function StudentHome({ data, student, onUpdateAssignment }: { data: AppData; student: StudentProfile; onUpdateAssignment: (id: string, patch: Partial<MissionAssignment>) => void }) {
+function StudentHome({
+  data,
+  student,
+  currentUser,
+  onUpdateAssignment,
+  onSaveMeetingNotice,
+  onDeleteMeetingNotice,
+}: {
+  data: AppData;
+  student: StudentProfile;
+  currentUser: User;
+  onUpdateAssignment: (id: string, patch: Partial<MissionAssignment>) => void;
+  onSaveMeetingNotice: (notice: MeetingNotice) => void;
+  onDeleteMeetingNotice: (id: string) => void;
+}) {
   const assignments = getTodayAssignments(data, student.id);
   return (
     <div className="stack">
-      <MeetingNoticePanel notices={data.meetingNotices} />
+      <MeetingNoticePanel
+        notices={data.meetingNotices}
+        currentUser={currentUser}
+        editable
+        onSave={onSaveMeetingNotice}
+        onDelete={onDeleteMeetingNotice}
+      />
       <section className="panel">
         <SectionTitle icon={<ClipboardList size={18} />} title="오늘의 자기주도 목표" />
         <p className="sectionHint">오늘 무엇을 해볼지 스스로 목표를 세우고, 마무리할 때 달성도와 자기평가를 남겨 주세요.</p>
