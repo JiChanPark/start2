@@ -277,11 +277,12 @@ export function App() {
   };
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const csv = buildStudentExportCsv(data);
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `research-intern-data-${today}.json`;
+    link.download = `research-intern-students-${today}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -492,10 +493,10 @@ function DataPortabilityControls({ onExport, onImport }: { onExport: () => void;
   return (
     <div className="dataTools">
       <button className="ghostButton" onClick={onExport}>
-        데이터 내보내기
+        CSV 내보내기
       </button>
       <label className="ghostButton importButton">
-        데이터 가져오기
+        JSON 가져오기
         <input
           type="file"
           accept="application/json"
@@ -1597,6 +1598,69 @@ function ProgressBar({ value }: { value: number }) {
       <div style={{ width: `${value}%` }} />
     </div>
   );
+}
+
+function buildStudentExportCsv(data: AppData) {
+  const headers = [
+    "이름",
+    "이메일",
+    "역할",
+    "상태",
+    "소속",
+    "전공",
+    "멘토",
+    "인턴 시작일",
+    "인턴 종료일",
+    "전체 목표 수",
+    "완료 목표 수",
+    "평균 달성도",
+    "회고 수",
+    "주간 보고서 수",
+    "피드백 수",
+    "최근 회고일",
+    "최근 관심 분야",
+  ];
+
+  const rows = data.students.map((student) => {
+    const user = getUser(data, student);
+    const assignments = data.assignments.filter((assignment) => assignment.studentId === student.id);
+    const completed = assignments.filter((assignment) => assignment.status === "DONE").length;
+    const averageAchievement = assignments.length
+      ? Math.round(assignments.reduce((sum, assignment) => sum + (assignment.achievementRate ?? (assignment.status === "DONE" ? 100 : 0)), 0) / assignments.length)
+      : 0;
+    const reflections = data.reflections.filter((reflection) => reflection.studentId === student.id);
+    const latestReflection = [...reflections].sort((a, b) => b.reflectionDate.localeCompare(a.reflectionDate))[0];
+    const reports = data.weeklyReports.filter((report) => report.studentId === student.id);
+    const latestReport = [...reports].sort((a, b) => b.weekEndDate.localeCompare(a.weekEndDate))[0];
+    const feedbackCount = data.mentorNotes.filter((note) => note.studentId === student.id).length;
+
+    return [
+      user.name,
+      user.email,
+      getRoleLabel(user.role),
+      student.status,
+      student.affiliation,
+      student.major,
+      student.mentorName,
+      student.internshipStartDate,
+      student.internshipEndDate,
+      assignments.length,
+      completed,
+      averageAchievement + "%",
+      reflections.length,
+      reports.length,
+      feedbackCount,
+      latestReflection?.reflectionDate ?? "",
+      latestReport?.newInterests ?? "",
+    ];
+  });
+
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
+function csvCell(value: string | number) {
+  const text = String(value ?? "");
+  return '"' + text.replace(/"/g, '""') + '"';
 }
 
 function getRoleLabel(role: User["role"]) {
