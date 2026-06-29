@@ -7,6 +7,7 @@ export interface User {
   email: string;
   name: string;
   role: Role;
+  passwordHash?: string;
 }
 
 export interface StudentProfile {
@@ -108,6 +109,23 @@ export interface PresentationFile {
   uploadedAt: string;
 }
 
+export interface SignupRequest {
+  id: string;
+  email: string;
+  name: string;
+  role: Exclude<Role, "OWNER">;
+  affiliation: string;
+  major: string;
+  mentorName: string;
+  internshipStartDate: string;
+  internshipEndDate: string;
+  passwordHash: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+}
+
 export interface AppData {
   users: User[];
   students: StudentProfile[];
@@ -118,6 +136,7 @@ export interface AppData {
   weeklyReports: WeeklyReport[];
   meetingNotices: MeetingNotice[];
   presentationFiles: PresentationFile[];
+  signupRequests: SignupRequest[];
 }
 
 export interface AuthSession {

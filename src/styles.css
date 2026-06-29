@@ -1864,3 +1864,93 @@ button {
     flex-direction: column;
   }
 }
+
+.authTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(27, 61, 47, 0.08);
+}
+
+.authTabs button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.authTabs button.active {
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(27, 61, 47, 0.18);
+}
+
+.signupForm {
+  display: grid;
+  gap: 11px;
+}
+
+.signupForm input,
+.signupForm select {
+  width: 100%;
+}
+
+.successText {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(47, 105, 87, 0.1);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.signupApprovalPanel {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(252, 245, 229, 0.86)),
+    radial-gradient(circle at top right, rgba(236, 164, 78, 0.13), transparent 36%);
+}
+
+.signupRequestList {
+  display: grid;
+  gap: 12px;
+}
+
+.signupRequestCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(27, 61, 47, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.signupRequestCard div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.signupRequestCard span,
+.signupRequestCard small {
+  color: var(--muted);
+}
+
+.reviewedSignupList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .signupRequestCard {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

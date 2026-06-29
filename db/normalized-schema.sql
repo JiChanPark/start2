@@ -3,6 +3,7 @@ create table if not exists public.profiles (
   email text not null unique,
   name text not null,
   role text not null check (role in ('OWNER', 'MENTOR', 'GRAD_STUDENT', 'INTERN')),
+  password_hash text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -110,6 +111,23 @@ create table if not exists public.presentation_files (
   uploaded_at timestamptz not null default now()
 );
 
+create table if not exists public.signup_requests (
+  id text primary key,
+  email text not null,
+  name text not null,
+  role text not null check (role in ('MENTOR', 'GRAD_STUDENT', 'INTERN')),
+  affiliation text not null,
+  major text not null,
+  mentor_name text not null,
+  internship_start_date date not null,
+  internship_end_date date not null,
+  password_hash text not null,
+  status text not null check (status in ('PENDING', 'APPROVED', 'REJECTED')),
+  requested_at timestamptz not null default now(),
+  reviewed_at timestamptz,
+  reviewed_by text references public.profiles(id) on delete set null
+);
+
 alter table public.profiles enable row level security;
 alter table public.student_profiles enable row level security;
 alter table public.missions enable row level security;
@@ -119,6 +137,7 @@ alter table public.mentor_notes enable row level security;
 alter table public.weekly_reports enable row level security;
 alter table public.meeting_notices enable row level security;
 alter table public.presentation_files enable row level security;
+alter table public.signup_requests enable row level security;
 
 do $$
 declare
@@ -133,7 +152,8 @@ begin
     'mentor_notes',
     'weekly_reports',
     'meeting_notices',
-    'presentation_files'
+    'presentation_files',
+    'signup_requests'
   ]
   loop
     execute format('drop policy if exists authenticated_select on public.%I', table_name);

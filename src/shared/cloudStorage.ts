@@ -6,11 +6,11 @@ import type {
   MissionAssignment,
   PresentationFile,
   Reflection,
+  SignupRequest,
   StudentProfile,
   User,
   WeeklyReport,
 } from "../entities";
-import { authClient } from "./supabaseAuth";
 import { normalizeAppData } from "./storage";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -26,10 +26,9 @@ interface CloudStateRow {
 const enabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 function authHeaders() {
-  const token = authClient.getSession()?.accessToken ?? SUPABASE_ANON_KEY ?? "";
   return {
     apikey: SUPABASE_ANON_KEY ?? "",
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ""}`,
     "Content-Type": "application/json",
   };
 }
@@ -67,7 +66,7 @@ function upsertRows(table: string, rows: unknown[]) {
 async function loadNormalized(): Promise<AppData | null> {
   const users = await rest<UserRow[]>("profiles", "?select=*");
 
-  const [students, missions, assignments, reflections, mentorNotes, weeklyReports, meetingNotices, presentationFiles] = await Promise.all([
+  const [students, missions, assignments, reflections, mentorNotes, weeklyReports, meetingNotices, presentationFiles, signupRequests] = await Promise.all([
     rest<StudentRow[]>("student_profiles", "?select=*"),
     rest<MissionRow[]>("missions", "?select=*"),
     rest<AssignmentRow[]>("mission_assignments", "?select=*"),
@@ -76,6 +75,7 @@ async function loadNormalized(): Promise<AppData | null> {
     rest<WeeklyReportRow[]>("weekly_reports", "?select=*"),
     rest<MeetingNoticeRow[]>("meeting_notices", "?select=*"),
     rest<PresentationFileRow[]>("presentation_files", "?select=*"),
+    rest<SignupRequestRow[]>("signup_requests", "?select=*"),
   ]);
 
   if (!users.length || !students.length) return null;
@@ -90,6 +90,7 @@ async function loadNormalized(): Promise<AppData | null> {
     weeklyReports: weeklyReports.map(fromWeeklyReportRow),
     meetingNotices: meetingNotices.map(fromMeetingNoticeRow),
     presentationFiles: presentationFiles.map(fromPresentationFileRow),
+    signupRequests: signupRequests.map(fromSignupRequestRow),
   });
 }
 
@@ -103,6 +104,7 @@ async function saveNormalized(data: AppData) {
   await upsertRows("weekly_reports", data.weeklyReports.map(toWeeklyReportRow));
   await upsertRows("meeting_notices", data.meetingNotices.map(toMeetingNoticeRow));
   await upsertRows("presentation_files", data.presentationFiles.map(toPresentationFileRow));
+  await upsertRows("signup_requests", data.signupRequests.map(toSignupRequestRow));
 }
 
 async function loadAppState(): Promise<AppData | null> {
@@ -157,6 +159,7 @@ interface UserRow {
   email: string;
   name: string;
   role: User["role"];
+  password_hash?: string;
 }
 
 interface StudentRow {
@@ -258,8 +261,25 @@ interface PresentationFileRow {
   uploaded_at: string;
 }
 
-const fromUserRow = (row: UserRow): User => ({ id: row.id, email: row.email, name: row.name, role: row.role });
-const toUserRow = (user: User): UserRow => ({ id: user.id, email: user.email, name: user.name, role: user.role });
+interface SignupRequestRow {
+  id: string;
+  email: string;
+  name: string;
+  role: SignupRequest["role"];
+  affiliation: string;
+  major: string;
+  mentor_name: string;
+  internship_start_date: string;
+  internship_end_date: string;
+  password_hash: string;
+  status: SignupRequest["status"];
+  requested_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+}
+
+const fromUserRow = (row: UserRow): User => ({ id: row.id, email: row.email, name: row.name, role: row.role, passwordHash: row.password_hash });
+const toUserRow = (user: User): UserRow => ({ id: user.id, email: user.email, name: user.name, role: user.role, password_hash: user.passwordHash });
 
 const fromStudentRow = (row: StudentRow): StudentProfile => ({
   id: row.id,
@@ -449,4 +469,37 @@ const toPresentationFileRow = (file: PresentationFile): PresentationFileRow => (
   file_size: file.fileSize,
   file_data_url: file.fileDataUrl,
   uploaded_at: file.uploadedAt,
+});
+
+const fromSignupRequestRow = (row: SignupRequestRow): SignupRequest => ({
+  id: row.id,
+  email: row.email,
+  name: row.name,
+  role: row.role,
+  affiliation: row.affiliation,
+  major: row.major,
+  mentorName: row.mentor_name,
+  internshipStartDate: row.internship_start_date,
+  internshipEndDate: row.internship_end_date,
+  passwordHash: row.password_hash,
+  status: row.status,
+  requestedAt: row.requested_at,
+  reviewedAt: row.reviewed_at,
+  reviewedBy: row.reviewed_by,
+});
+const toSignupRequestRow = (request: SignupRequest): SignupRequestRow => ({
+  id: request.id,
+  email: request.email,
+  name: request.name,
+  role: request.role,
+  affiliation: request.affiliation,
+  major: request.major,
+  mentor_name: request.mentorName,
+  internship_start_date: request.internshipStartDate,
+  internship_end_date: request.internshipEndDate,
+  password_hash: request.passwordHash,
+  status: request.status,
+  requested_at: request.requestedAt,
+  reviewed_at: request.reviewedAt,
+  reviewed_by: request.reviewedBy,
 });

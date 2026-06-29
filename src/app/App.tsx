@@ -17,12 +17,11 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { AppData, MeetingNotice, MentorNote, Mission, MissionAssignment, PresentationFile, Reflection, StudentProfile, User, WeeklyReport } from "../entities";
+import type { AppData, MeetingNotice, MentorNote, Mission, MissionAssignment, PresentationFile, Reflection, SignupRequest, StudentProfile, User, WeeklyReport } from "../entities";
 import { mockAiTutor } from "../features/ai/mockAiTutor";
 import { cloudRepository } from "../shared/cloudStorage";
 import { formatDate, todayKey } from "../shared/date";
 import { repository } from "../shared/storage";
-import { authClient } from "../shared/supabaseAuth";
 
 type View = "dashboard" | "mentor-dashboard" | "students" | "student-detail" | "student-home" | "reflection" | "weekly-report" | "history";
 
@@ -39,6 +38,10 @@ interface CreateStudentInput {
 
 interface UpdateStudentInput extends CreateStudentInput {
   status: StudentProfile["status"];
+}
+
+interface SignupInput extends CreateStudentInput {
+  password: string;
 }
 
 const today = todayKey();
@@ -118,51 +121,51 @@ export function App() {
     setSelectedStudentId(data.students.find((student) => student.userId === user.id)?.id ?? null);
   };
 
-  useEffect(() => {
-    if (!authClient.enabled || currentUser) return;
-    const session = authClient.getSession();
-    if (!session) return;
-
-    authClient.loadProfile(session)
-      .then((profile) => {
-        const user = profile ?? data.users.find((item) => item.email.toLowerCase() === session.email.toLowerCase());
-        if (user) openHomeForUser(user);
-      })
-      .catch(() => authClient.clearSession());
-  }, [currentUser, data.users]);
-
   const login = async (emailOrUserId: string, password?: string) => {
     const normalizedEmail = emailOrUserId.trim().toLowerCase();
-
-    if (authClient.enabled && password) {
-      try {
-        const session = await authClient.signIn(normalizedEmail, password);
-        const profile = await authClient.loadProfile(session);
-        const user = profile ?? data.users.find((item) => item.email.toLowerCase() === session.email.toLowerCase());
-
-        if (!user) {
-          authClient.clearSession();
-          return "Supabase Auth 로그인은 되었지만 profiles 테이블에서 역할 정보를 찾지 못했습니다.";
-        }
-
-        openHomeForUser(user);
-        return;
-      } catch {
-        return "로그인에 실패했습니다. Supabase Authentication에 계정이 있는지, 비밀번호가 맞는지 확인해 주세요.";
-      }
-    }
-
     const user =
       data.users.find((item) => item.id === emailOrUserId) ??
       data.users.find((item) => item.email.toLowerCase() === normalizedEmail);
-    if (!user || password !== "demo123") return "이메일 또는 비밀번호를 확인해 주세요. 로컬 데모 비밀번호는 demo123입니다.";
 
-    authClient.clearSession();
+    if (!user || !password) return "??? ?? ????? ??? ???.";
+
+    const passwordHash = await hashPassword(password);
+    const isLegacyDemoPassword = !user.passwordHash && password === "demo123";
+    if (user.passwordHash !== passwordHash && !isLegacyDemoPassword) {
+      return "??? ?? ????? ??? ???.";
+    }
+
     openHomeForUser(user);
   };
 
+  const submitSignupRequest = async (input: SignupInput) => {
+    const email = input.email.trim().toLowerCase();
+    if (data.users.some((user) => user.email.toLowerCase() === email)) {
+      return "?? ??? ??????.";
+    }
+    if (data.signupRequests.some((request) => request.email.toLowerCase() === email && request.status === "PENDING")) {
+      return "?? ?? ?? ?? ?? ??? ????.";
+    }
+
+    const request: SignupRequest = {
+      id: "sr-" + crypto.randomUUID(),
+      email,
+      name: input.name.trim(),
+      role: input.role,
+      affiliation: input.affiliation.trim(),
+      major: input.major.trim(),
+      mentorName: input.mentorName.trim(),
+      internshipStartDate: input.internshipStartDate,
+      internshipEndDate: input.internshipEndDate,
+      passwordHash: await hashPassword(input.password),
+      status: "PENDING",
+      requestedAt: new Date().toISOString(),
+    };
+
+    commitData({ ...data, signupRequests: [request, ...data.signupRequests] });
+  };
+
   const logout = () => {
-    authClient.clearSession();
     setCurrentUser(null);
     setView("dashboard");
   };
@@ -331,6 +334,58 @@ export function App() {
     setView("student-detail");
   };
 
+  const approveSignupRequest = (requestId: string) => {
+    const request = data.signupRequests.find((item) => item.id === requestId);
+    if (!request || request.status !== "PENDING" || !currentUser) return;
+
+    const userId = `u-${crypto.randomUUID()}`;
+    const studentId = `s-${crypto.randomUUID()}`;
+    const nextData: AppData = {
+      ...data,
+      users: [
+        ...data.users,
+        {
+          id: userId,
+          email: request.email,
+          name: request.name,
+          role: request.role,
+          passwordHash: request.passwordHash,
+        },
+      ],
+      students: [
+        ...data.students,
+        {
+          id: studentId,
+          userId,
+          affiliation: request.affiliation,
+          major: request.major,
+          mentorName: request.mentorName,
+          internshipStartDate: request.internshipStartDate,
+          internshipEndDate: request.internshipEndDate,
+          status: "ACTIVE",
+        },
+      ],
+      signupRequests: data.signupRequests.map((item) =>
+        item.id === requestId
+          ? { ...item, status: "APPROVED", reviewedAt: new Date().toISOString(), reviewedBy: currentUser.id }
+          : item,
+      ),
+    };
+    commitData(nextData);
+  };
+
+  const rejectSignupRequest = (requestId: string) => {
+    if (!currentUser) return;
+    commitData({
+      ...data,
+      signupRequests: data.signupRequests.map((item) =>
+        item.id === requestId
+          ? { ...item, status: "REJECTED", reviewedAt: new Date().toISOString(), reviewedBy: currentUser.id }
+          : item,
+      ),
+    });
+  };
+
   const updateStudent = (studentId: string, input: UpdateStudentInput) => {
     const student = data.students.find((item) => item.id === studentId);
     if (!student) return;
@@ -401,7 +456,7 @@ export function App() {
   };
 
   if (!currentUser) {
-    return <LoginScreen data={data} onLogin={login} />;
+    return <LoginScreen data={data} onLogin={login} onSignup={submitSignupRequest} />;
   }
 
   const isOwner = currentUser.role === "OWNER";
@@ -487,6 +542,8 @@ export function App() {
             currentUser={currentUser}
             onSaveMeetingNotice={saveMeetingNotice}
             onDeleteMeetingNotice={deleteMeetingNotice}
+            onApproveSignup={approveSignupRequest}
+            onRejectSignup={rejectSignupRequest}
             onSelect={(id) => {
               setSelectedStudentId(id);
               setView("student-detail");
@@ -550,77 +607,161 @@ export function App() {
   );
 }
 
-function LoginScreen({ data, onLogin }: { data: AppData; onLogin: (email: string, password: string) => Promise<string | void> }) {
+function LoginScreen({
+  data,
+  onLogin,
+  onSignup,
+}: {
+  data: AppData;
+  onLogin: (email: string, password: string) => Promise<string | void>;
+  onSignup: (input: SignupInput) => Promise<string | void>;
+}) {
   const users = [...data.users].sort((a, b) => getRoleOrder(a.role) - getRoleOrder(b.role));
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState(users[0]?.email ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signup, setSignup] = useState<SignupInput>({
+    name: "",
+    email: "",
+    password: "",
+    role: "INTERN",
+    affiliation: "",
+    major: "",
+    mentorName: "오경희",
+    internshipStartDate: today,
+    internshipEndDate: today,
+  });
   const demoPassword = "demo123";
 
   const submitLogin = async () => {
     setLoading(true);
     setError("");
+    setMessage("");
     try {
-      const message = await onLogin(email, password);
-      if (message) setError(message);
+      const result = await onLogin(email, password);
+      if (result) setError(result);
     } finally {
       setLoading(false);
     }
   };
+
+  const submitSignup = async () => {
+    setLoading(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await onSignup(signup);
+      if (result) {
+        setError(result);
+        return;
+      }
+      setMessage("가입 신청이 접수되었습니다. 관리자가 승인하면 로그인할 수 있습니다.");
+      setSignup({ ...signup, name: "", email: "", password: "", affiliation: "", major: "" });
+      setMode("login");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canSignup = Boolean(
+    signup.name.trim() &&
+    signup.email.trim() &&
+    signup.password.length >= 6 &&
+    signup.affiliation.trim() &&
+    signup.major.trim() &&
+    signup.mentorName.trim(),
+  );
 
   return (
     <main className="loginScreen">
       <section className="loginPanel">
         <div className="loginCopy">
           <span className="eyebrow">Research Intern Growth Platform</span>
-          <h1>연구 인턴의 목표, 회고, 피드백을 연결하는 성장 기록 플랫폼</h1>
-          <p>Supabase Auth 기반 실제 로그인으로 역할별 권한을 분리하고, 기록은 공용 DB와 연동할 수 있게 구성했습니다.</p>
+          <h1>가입 신청과 관리자 승인을 거쳐 사용하는 연구 인턴 성장 플랫폼</h1>
+          <p>학생은 이메일과 비밀번호로 가입 신청을 하고, 관리자가 승인하면 역할에 맞는 화면으로 로그인합니다.</p>
         </div>
         <div className="loginBox">
-          <h2>로그인</h2>
-          <p className="loginHelp">
-            {authClient.enabled
-              ? "Supabase Authentication에 등록된 이메일과 비밀번호로 로그인합니다."
-              : <>로컬 데모 모드입니다. 비밀번호는 <b>demo123</b>입니다.</>}
-          </p>
-          <div className="loginForm">
-            <label>
-              <span>이메일</span>
-              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@lab.local" />
-            </label>
-            <label>
-              <span>비밀번호</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submitLogin();
-                }}
-                placeholder={authClient.enabled ? "Supabase Auth 비밀번호" : "demo123"}
-              />
-            </label>
-            {error && <p className="errorText">{error}</p>}
-            <button className="primaryButton" onClick={() => void submitLogin()} disabled={loading || !email.trim() || !password.trim()}>
-              {loading ? "로그인 확인 중" : "로그인"}
+          <div className="authTabs">
+            <button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>
+              로그인
+            </button>
+            <button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>
+              가입 신청
             </button>
           </div>
-          <div className="accountList compactAccounts">
-            {users.map((user) => (
-              <button
-                key={user.id}
-                onClick={() => {
-                  setEmail(user.email);
-                  setPassword(authClient.enabled ? "" : demoPassword);
-                  setError("");
-                }}
-              >
-                <span>{user.name}</span>
-                <small>{getRoleLabel(user.role)} · {user.email}</small>
-              </button>
-            ))}
-          </div>
+
+          {mode === "login" ? (
+            <>
+              <h2>로그인</h2>
+              <p className="loginHelp">관리자가 승인한 계정의 이메일과 비밀번호로 로그인합니다. 기존 데모 계정은 비밀번호 <b>demo123</b>을 사용할 수 있습니다.</p>
+              <div className="loginForm">
+                <label>
+                  <span>이메일</span>
+                  <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@lab.local" />
+                </label>
+                <label>
+                  <span>비밀번호</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void submitLogin();
+                    }}
+                    placeholder="비밀번호"
+                  />
+                </label>
+                {error && <p className="errorText">{error}</p>}
+                {message && <p className="successText">{message}</p>}
+                <button className="primaryButton" onClick={() => void submitLogin()} disabled={loading || !email.trim() || !password.trim()}>
+                  {loading ? "로그인 확인 중" : "로그인"}
+                </button>
+              </div>
+              <div className="accountList compactAccounts">
+                {users.map((user) => (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      setEmail(user.email);
+                      setPassword(user.passwordHash ? "" : demoPassword);
+                      setError("");
+                    }}
+                  >
+                    <span>{user.name}</span>
+                    <small>{getRoleLabel(user.role)} · {user.email}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>가입 신청</h2>
+              <p className="loginHelp">신청 후 관리자가 승인하면 입력한 이메일과 비밀번호로 로그인할 수 있습니다.</p>
+              <div className="signupForm">
+                <input placeholder="이름" value={signup.name} onChange={(event) => setSignup({ ...signup, name: event.target.value })} />
+                <input placeholder="이메일" value={signup.email} onChange={(event) => setSignup({ ...signup, email: event.target.value })} />
+                <input type="password" placeholder="비밀번호 6자 이상" value={signup.password} onChange={(event) => setSignup({ ...signup, password: event.target.value })} />
+                <select value={signup.role} onChange={(event) => setSignup({ ...signup, role: event.target.value as SignupInput["role"] })}>
+                  <option value="INTERN">인턴</option>
+                  <option value="GRAD_STUDENT">학연생</option>
+                  <option value="MENTOR">멘토</option>
+                </select>
+                <input placeholder="소속" value={signup.affiliation} onChange={(event) => setSignup({ ...signup, affiliation: event.target.value })} />
+                <input placeholder="전공/분야" value={signup.major} onChange={(event) => setSignup({ ...signup, major: event.target.value })} />
+                <input placeholder="멘토 이름" value={signup.mentorName} onChange={(event) => setSignup({ ...signup, mentorName: event.target.value })} />
+                <input type="date" value={signup.internshipStartDate} onChange={(event) => setSignup({ ...signup, internshipStartDate: event.target.value })} />
+                <input type="date" value={signup.internshipEndDate} onChange={(event) => setSignup({ ...signup, internshipEndDate: event.target.value })} />
+                {error && <p className="errorText">{error}</p>}
+                {message && <p className="successText">{message}</p>}
+                <button className="primaryButton" disabled={!canSignup || loading} onClick={() => void submitSignup()}>
+                  가입 신청 제출
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </section>
     </main>
@@ -855,18 +996,70 @@ function MentorDashboard({ data, currentUser, onSelect }: { data: AppData; curre
   );
 }
 
+function SignupApprovalPanel({
+  requests,
+  onApprove,
+  onReject,
+}: {
+  requests: SignupRequest[];
+  onApprove: (requestId: string) => void;
+  onReject: (requestId: string) => void;
+}) {
+  const pending = requests.filter((request) => request.status === "PENDING");
+  const reviewed = requests.filter((request) => request.status !== "PENDING").slice(0, 6);
+
+  return (
+    <section className="panel signupApprovalPanel">
+      <SectionTitle icon={<Users size={18} />} title="가입 신청 승인" />
+      <p className="sectionHint">학생이나 멘토가 가입 신청을 제출하면 관리자가 확인 후 승인할 수 있습니다.</p>
+      {pending.length ? (
+        <div className="signupRequestList">
+          {pending.map((request) => (
+            <article className="signupRequestCard" key={request.id}>
+              <div>
+                <strong>{request.name}</strong>
+                <span>{getRoleLabel(request.role)} · {request.email}</span>
+                <small>{request.affiliation} · {request.major} · 멘토 {request.mentorName}</small>
+              </div>
+              <div className="studentActionGroup">
+                <button className="primaryButton" onClick={() => onApprove(request.id)}>승인</button>
+                <button className="dangerButton" onClick={() => onReject(request.id)}>거절</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty">승인 대기 중인 가입 신청이 없습니다.</p>
+      )}
+      {reviewed.length > 0 && (
+        <div className="reviewedSignupList">
+          {reviewed.map((request) => (
+            <span className={request.status === "APPROVED" ? "okChip" : "riskChip"} key={request.id}>
+              {request.name} · {request.status === "APPROVED" ? "승인됨" : "거절됨"}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AdminDashboard({
   data,
   currentUser,
   onSelect,
   onSaveMeetingNotice,
   onDeleteMeetingNotice,
+  onApproveSignup,
+  onRejectSignup,
 }: {
   data: AppData;
   currentUser: User;
   onSelect: (id: string) => void;
   onSaveMeetingNotice: (notice: MeetingNotice) => void;
   onDeleteMeetingNotice: (id: string) => void;
+  onApproveSignup: (requestId: string) => void;
+  onRejectSignup: (requestId: string) => void;
 }) {
   const todayAssignments = data.assignments.filter((item) => item.assignedDate === today);
   const completed = todayAssignments.filter((item) => item.status === "DONE").length;
@@ -884,6 +1077,11 @@ function AdminDashboard({
         editable
         onSave={onSaveMeetingNotice}
         onDelete={onDeleteMeetingNotice}
+      />
+      <SignupApprovalPanel
+        requests={data.signupRequests}
+        onApprove={onApproveSignup}
+        onReject={onRejectSignup}
       />
       <section className="metricGrid">
         <Metric title="전체 학생" value={`${data.students.length}명`} />
@@ -2018,6 +2216,14 @@ function readFileAsDataUrl(file: File) {
 function formatFileSize(size: number) {
   if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
+}
+
+async function hashPassword(password: string) {
+  const bytes = new TextEncoder().encode(password);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function getRoleLabel(role: User["role"]) {
