@@ -164,6 +164,7 @@ export const seedData: AppData = {
       pinned: true,
     },
   ],
+  presentationFiles: [],
 };
 
 function getSeedWeekRange(dateString: string) {

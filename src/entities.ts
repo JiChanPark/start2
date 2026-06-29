@@ -96,6 +96,18 @@ export interface MeetingNotice {
   pinned: boolean;
 }
 
+export interface PresentationFile {
+  id: string;
+  studentId: string;
+  title: string;
+  description: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  fileDataUrl: string;
+  uploadedAt: string;
+}
+
 export interface AppData {
   users: User[];
   students: StudentProfile[];
@@ -105,6 +117,7 @@ export interface AppData {
   mentorNotes: MentorNote[];
   weeklyReports: WeeklyReport[];
   meetingNotices: MeetingNotice[];
+  presentationFiles: PresentationFile[];
 }
 
 export interface AuthSession {

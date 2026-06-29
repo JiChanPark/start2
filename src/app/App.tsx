@@ -6,7 +6,9 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  Download,
   FileText,
+  FileUp,
   HelpCircle,
   History,
   LogOut,
@@ -15,7 +17,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { AppData, MeetingNotice, MentorNote, Mission, MissionAssignment, Reflection, StudentProfile, User, WeeklyReport } from "../entities";
+import type { AppData, MeetingNotice, MentorNote, Mission, MissionAssignment, PresentationFile, Reflection, StudentProfile, User, WeeklyReport } from "../entities";
 import { mockAiTutor } from "../features/ai/mockAiTutor";
 import { cloudRepository } from "../shared/cloudStorage";
 import { formatDate, todayKey } from "../shared/date";
@@ -191,6 +193,14 @@ export function App() {
     setData(repository.upsertWeeklyReport(report));
   };
 
+  const savePresentationFile = (file: PresentationFile) => {
+    const nextData: AppData = {
+      ...data,
+      presentationFiles: [file, ...data.presentationFiles.filter((item) => item.id !== file.id)],
+    };
+    commitData(nextData);
+  };
+
   const saveMeetingNotice = (notice: MeetingNotice) => {
     const exists = data.meetingNotices.some((item) => item.id === notice.id);
     const nextData: AppData = {
@@ -364,6 +374,7 @@ export function App() {
       reflections: data.reflections.filter((reflection) => reflection.studentId !== studentId),
       mentorNotes: data.mentorNotes.filter((note) => note.studentId !== studentId),
       weeklyReports: data.weeklyReports.filter((report) => report.studentId !== studentId),
+      presentationFiles: data.presentationFiles.filter((file) => file.studentId !== studentId),
     };
     repository.save(nextData);
     setData(nextData);
@@ -521,6 +532,7 @@ export function App() {
             currentUser={currentUser}
             onUpdateAssignment={updateAssignment}
             onCreateSelfDirectedGoal={createSelfDirectedGoal}
+            onSavePresentationFile={savePresentationFile}
             onSaveMeetingNotice={saveMeetingNotice}
             onDeleteMeetingNotice={deleteMeetingNotice}
           />
@@ -1101,6 +1113,7 @@ function StudentDetail({
   const dailyMentorNotes = data.mentorNotes.filter((item) => item.studentId === student.id && item.type === "DAILY_MENTOR");
   const weeklyOwnerNotes = data.mentorNotes.filter((item) => item.studentId === student.id && item.type === "WEEKLY_OWNER");
   const reports = data.weeklyReports.filter((item) => item.studentId === student.id);
+  const presentationFiles = data.presentationFiles.filter((file) => file.studentId === student.id);
   const [summary, setSummary] = useState("AI 요약을 생성하면 이 학생의 오늘 흐름을 간단히 정리합니다.");
   const [note, setNote] = useState("");
   const defaultFeedbackWeek = getWeekRange(today);
@@ -1234,6 +1247,10 @@ function StudentDetail({
           </article>
         )) : <p className="empty">아직 작성된 주간 보고서가 없습니다.</p>}
       </section>
+      <section className="panel presentationPanel">
+        <SectionTitle icon={<FileUp size={18} />} title="PPT ?? ??" />
+        <PresentationFileList files={presentationFiles} />
+      </section>
       <section className="panel">
         <SectionTitle icon={<Sparkles size={18} />} title="관리자용 AI 진행 요약" />
         <p className="aiBox">{summary}</p>
@@ -1263,6 +1280,7 @@ function StudentHome({
   currentUser,
   onUpdateAssignment,
   onCreateSelfDirectedGoal,
+  onSavePresentationFile,
   onSaveMeetingNotice,
   onDeleteMeetingNotice,
 }: {
@@ -1271,10 +1289,12 @@ function StudentHome({
   currentUser: User;
   onUpdateAssignment: (id: string, patch: Partial<MissionAssignment>) => void;
   onCreateSelfDirectedGoal: (studentId: string, input: { title: string; description: string }) => void;
+  onSavePresentationFile: (file: PresentationFile) => void;
   onSaveMeetingNotice: (notice: MeetingNotice) => void;
   onDeleteMeetingNotice: (id: string) => void;
 }) {
   const assignments = getTodayAssignments(data, student.id);
+  const presentationFiles = data.presentationFiles.filter((file) => file.studentId === student.id);
   return (
     <div className="stack">
       <MeetingNoticePanel
@@ -1290,6 +1310,11 @@ function StudentHome({
         <SelfDirectedGoalCreator studentId={student.id} onCreate={onCreateSelfDirectedGoal} />
         <MissionList data={data} assignments={assignments} onUpdateAssignment={onUpdateAssignment} />
       </section>
+      <PresentationUploadPanel
+        studentId={student.id}
+        files={presentationFiles}
+        onSave={onSavePresentationFile}
+      />
     </div>
   );
 }
@@ -1318,6 +1343,102 @@ function SelfDirectedGoalCreator({ studentId, onCreate }: { studentId: string; o
       >
         <CheckCircle2 size={16} /> 자기주도 목표 추가
       </button>
+    </div>
+  );
+}
+
+function PresentationUploadPanel({
+  studentId,
+  files,
+  onSave,
+}: {
+  studentId: string;
+  files: PresentationFile[];
+  onSave: (file: PresentationFile) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const maxSize = 8 * 1024 * 1024;
+
+  const canUpload = Boolean(title.trim() && selectedFile);
+
+  const upload = async () => {
+    if (!selectedFile) return;
+    if (!isPresentationFile(selectedFile)) {
+      setError("PPT, PPTX, PDF 파일만 업로드할 수 있습니다.");
+      return;
+    }
+    if (selectedFile.size > maxSize) {
+      setError("현재 MVP에서는 8MB 이하 파일만 업로드할 수 있습니다.");
+      return;
+    }
+
+    const fileDataUrl = await readFileAsDataUrl(selectedFile);
+    onSave({
+      id: `p-${crypto.randomUUID()}`,
+      studentId,
+      title: title.trim(),
+      description: description.trim(),
+      fileName: selectedFile.name,
+      fileType: selectedFile.type || getPresentationMimeType(selectedFile.name),
+      fileSize: selectedFile.size,
+      fileDataUrl,
+      uploadedAt: new Date().toISOString(),
+    });
+    setTitle("");
+    setDescription("");
+    setSelectedFile(null);
+    setError("");
+  };
+
+  return (
+    <section className="panel presentationPanel">
+      <SectionTitle icon={<FileUp size={18} />} title="PPT 발표 자료 업로드" />
+      <p className="sectionHint">학생 발표 자료를 PPT/PPTX/PDF 형태로 저장합니다. 1차 MVP에서는 8MB 이하 파일을 지원합니다.</p>
+      <div className="presentationUploadForm">
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="발표 제목" />
+        <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="발표 주제, 발표일, 참고 사항을 적어주세요." rows={3} />
+        <label className="filePicker">
+          <FileUp size={16} />
+          <span>{selectedFile ? selectedFile.name : "PPT/PPTX/PDF 파일 선택"}</span>
+          <input
+            type="file"
+            accept=".ppt,.pptx,.pdf,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            onChange={(event) => {
+              setSelectedFile(event.target.files?.[0] ?? null);
+              setError("");
+            }}
+          />
+        </label>
+        {error && <p className="errorText">{error}</p>}
+        <button className="primaryButton" disabled={!canUpload} onClick={() => void upload()}>
+          <FileUp size={16} /> 발표 자료 업로드
+        </button>
+      </div>
+      <PresentationFileList files={files} />
+    </section>
+  );
+}
+
+function PresentationFileList({ files }: { files: PresentationFile[] }) {
+  if (!files.length) return <p className="empty">아직 업로드된 발표 자료가 없습니다.</p>;
+
+  return (
+    <div className="presentationList">
+      {files.map((file) => (
+        <article className="presentationCard" key={file.id}>
+          <div>
+            <strong>{file.title}</strong>
+            <p>{file.description || "설명 없음"}</p>
+            <small>{file.fileName} · {formatFileSize(file.fileSize)} · {formatDate(file.uploadedAt.slice(0, 10))}</small>
+          </div>
+          <a className="secondaryButton" href={file.fileDataUrl} download={file.fileName}>
+            <Download size={16} /> 다운로드
+          </a>
+        </article>
+      ))}
     </div>
   );
 }
@@ -1864,6 +1985,39 @@ function buildStudentExportCsv(data: AppData) {
 function csvCell(value: string | number) {
   const text = String(value ?? "");
   return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function isPresentationFile(file: File) {
+  const name = file.name.toLowerCase();
+  return (
+    name.endsWith(".ppt") ||
+    name.endsWith(".pptx") ||
+    name.endsWith(".pdf") ||
+    file.type === "application/pdf" ||
+    file.type === "application/vnd.ms-powerpoint" ||
+    file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  );
+}
+
+function getPresentationMimeType(fileName: string) {
+  const name = fileName.toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+  return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
+  return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
 function getRoleLabel(role: User["role"]) {

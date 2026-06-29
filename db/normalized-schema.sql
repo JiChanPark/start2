@@ -98,6 +98,18 @@ create table if not exists public.meeting_notices (
   pinned boolean not null default false
 );
 
+create table if not exists public.presentation_files (
+  id text primary key,
+  student_id text not null references public.student_profiles(id) on delete cascade,
+  title text not null,
+  description text not null default '',
+  file_name text not null,
+  file_type text not null,
+  file_size integer not null,
+  file_data_url text not null,
+  uploaded_at timestamptz not null default now()
+);
+
 alter table public.profiles enable row level security;
 alter table public.student_profiles enable row level security;
 alter table public.missions enable row level security;
@@ -106,6 +118,7 @@ alter table public.reflections enable row level security;
 alter table public.mentor_notes enable row level security;
 alter table public.weekly_reports enable row level security;
 alter table public.meeting_notices enable row level security;
+alter table public.presentation_files enable row level security;
 
 do $$
 declare
@@ -119,7 +132,8 @@ begin
     'reflections',
     'mentor_notes',
     'weekly_reports',
-    'meeting_notices'
+    'meeting_notices',
+    'presentation_files'
   ]
   loop
     execute format('drop policy if exists authenticated_select on public.%I', table_name);

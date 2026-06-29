@@ -24,6 +24,7 @@ export const normalizeAppData = (data: AppData): AppData => ({
   })),
   weeklyReports: data.weeklyReports ?? [],
   meetingNotices: data.meetingNotices ?? seedData.meetingNotices ?? [],
+  presentationFiles: data.presentationFiles ?? [],
   assignments: (data.assignments ?? []).map((assignment) => ({
     ...assignment,
     note: assignment.note ?? "",

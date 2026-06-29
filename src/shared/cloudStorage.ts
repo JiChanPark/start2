@@ -4,6 +4,7 @@ import type {
   MentorNote,
   Mission,
   MissionAssignment,
+  PresentationFile,
   Reflection,
   StudentProfile,
   User,
@@ -66,7 +67,7 @@ function upsertRows(table: string, rows: unknown[]) {
 async function loadNormalized(): Promise<AppData | null> {
   const users = await rest<UserRow[]>("profiles", "?select=*");
 
-  const [students, missions, assignments, reflections, mentorNotes, weeklyReports, meetingNotices] = await Promise.all([
+  const [students, missions, assignments, reflections, mentorNotes, weeklyReports, meetingNotices, presentationFiles] = await Promise.all([
     rest<StudentRow[]>("student_profiles", "?select=*"),
     rest<MissionRow[]>("missions", "?select=*"),
     rest<AssignmentRow[]>("mission_assignments", "?select=*"),
@@ -74,6 +75,7 @@ async function loadNormalized(): Promise<AppData | null> {
     rest<MentorNoteRow[]>("mentor_notes", "?select=*"),
     rest<WeeklyReportRow[]>("weekly_reports", "?select=*"),
     rest<MeetingNoticeRow[]>("meeting_notices", "?select=*"),
+    rest<PresentationFileRow[]>("presentation_files", "?select=*"),
   ]);
 
   if (!users.length || !students.length) return null;
@@ -87,6 +89,7 @@ async function loadNormalized(): Promise<AppData | null> {
     mentorNotes: mentorNotes.map(fromMentorNoteRow),
     weeklyReports: weeklyReports.map(fromWeeklyReportRow),
     meetingNotices: meetingNotices.map(fromMeetingNoticeRow),
+    presentationFiles: presentationFiles.map(fromPresentationFileRow),
   });
 }
 
@@ -99,6 +102,7 @@ async function saveNormalized(data: AppData) {
   await upsertRows("mentor_notes", data.mentorNotes.map(toMentorNoteRow));
   await upsertRows("weekly_reports", data.weeklyReports.map(toWeeklyReportRow));
   await upsertRows("meeting_notices", data.meetingNotices.map(toMeetingNoticeRow));
+  await upsertRows("presentation_files", data.presentationFiles.map(toPresentationFileRow));
 }
 
 async function loadAppState(): Promise<AppData | null> {
@@ -240,6 +244,18 @@ interface MeetingNoticeRow {
   created_at: string;
   updated_at: string;
   pinned: boolean;
+}
+
+interface PresentationFileRow {
+  id: string;
+  student_id: string;
+  title: string;
+  description: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_data_url: string;
+  uploaded_at: string;
 }
 
 const fromUserRow = (row: UserRow): User => ({ id: row.id, email: row.email, name: row.name, role: row.role });
@@ -410,4 +426,27 @@ const toMeetingNoticeRow = (notice: MeetingNotice): MeetingNoticeRow => ({
   created_at: notice.createdAt,
   updated_at: notice.updatedAt,
   pinned: notice.pinned,
+});
+
+const fromPresentationFileRow = (row: PresentationFileRow): PresentationFile => ({
+  id: row.id,
+  studentId: row.student_id,
+  title: row.title,
+  description: row.description,
+  fileName: row.file_name,
+  fileType: row.file_type,
+  fileSize: row.file_size,
+  fileDataUrl: row.file_data_url,
+  uploadedAt: row.uploaded_at,
+});
+const toPresentationFileRow = (file: PresentationFile): PresentationFileRow => ({
+  id: file.id,
+  student_id: file.studentId,
+  title: file.title,
+  description: file.description,
+  file_name: file.fileName,
+  file_type: file.fileType,
+  file_size: file.fileSize,
+  file_data_url: file.fileDataUrl,
+  uploaded_at: file.uploadedAt,
 });
