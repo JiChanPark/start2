@@ -156,6 +156,7 @@ export const cloudRepository = {
 
 interface UserRow {
   id: string;
+  login_id?: string;
   email: string;
   name: string;
   role: User["role"];
@@ -263,6 +264,7 @@ interface PresentationFileRow {
 
 interface SignupRequestRow {
   id: string;
+  login_id: string;
   email: string;
   name: string;
   role: SignupRequest["role"];
@@ -278,8 +280,8 @@ interface SignupRequestRow {
   reviewed_by?: string;
 }
 
-const fromUserRow = (row: UserRow): User => ({ id: row.id, email: row.email, name: row.name, role: row.role, passwordHash: row.password_hash });
-const toUserRow = (user: User): UserRow => ({ id: user.id, email: user.email, name: user.name, role: user.role, password_hash: user.passwordHash });
+const fromUserRow = (row: UserRow): User => ({ id: row.id, loginId: row.login_id, email: row.email, name: row.name, role: row.role, passwordHash: row.password_hash });
+const toUserRow = (user: User): UserRow => ({ id: user.id, login_id: user.loginId, email: user.email, name: user.name, role: user.role, password_hash: user.passwordHash });
 
 const fromStudentRow = (row: StudentRow): StudentProfile => ({
   id: row.id,
@@ -473,6 +475,7 @@ const toPresentationFileRow = (file: PresentationFile): PresentationFileRow => (
 
 const fromSignupRequestRow = (row: SignupRequestRow): SignupRequest => ({
   id: row.id,
+  loginId: row.login_id,
   email: row.email,
   name: row.name,
   role: row.role,
@@ -489,6 +492,7 @@ const fromSignupRequestRow = (row: SignupRequestRow): SignupRequest => ({
 });
 const toSignupRequestRow = (request: SignupRequest): SignupRequestRow => ({
   id: request.id,
+  login_id: request.loginId,
   email: request.email,
   name: request.name,
   role: request.role,

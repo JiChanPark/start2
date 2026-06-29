@@ -1,5 +1,6 @@
 create table if not exists public.profiles (
   id text primary key,
+  login_id text unique,
   email text not null unique,
   name text not null,
   role text not null check (role in ('OWNER', 'MENTOR', 'GRAD_STUDENT', 'INTERN')),
@@ -113,6 +114,7 @@ create table if not exists public.presentation_files (
 
 create table if not exists public.signup_requests (
   id text primary key,
+  login_id text not null,
   email text not null,
   name text not null,
   role text not null check (role in ('MENTOR', 'GRAD_STUDENT', 'INTERN')),

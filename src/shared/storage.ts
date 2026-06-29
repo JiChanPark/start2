@@ -56,29 +56,35 @@ function normalizeMissions(missions: AppData["missions"]) {
 function normalizeUsers(users: AppData["users"]) {
   const normalized = users.map((user) => {
     const legacyRole = user.role as string;
+    const withLoginId = { ...user, loginId: user.loginId ?? getDefaultLoginId(user.email, user.id) };
     if (user.id === "u-admin") {
-      return { ...user, id: "u-owner", email: "owner@lab.local", name: "박지찬", role: "OWNER" as const };
+      return { ...withLoginId, id: "u-owner", loginId: "owner", email: "owner@lab.local", name: "???", role: "OWNER" as const };
     }
     if (user.id === "u-owner") {
-      return { ...user, name: "박지찬", role: "OWNER" as const };
+      return { ...withLoginId, loginId: withLoginId.loginId ?? "owner", name: "???", role: "OWNER" as const };
     }
     if (user.id === "u-mentor") {
-      return { ...user, name: "오경희", role: "MENTOR" as const };
+      return { ...withLoginId, loginId: withLoginId.loginId ?? "mentor", name: "???", role: "MENTOR" as const };
     }
     if (user.id === "u-001" || user.id === "u-002") {
-      return { ...user, role: "GRAD_STUDENT" as const };
+      return { ...withLoginId, role: "GRAD_STUDENT" as const };
     }
     if (user.id === "u-003" || user.id === "u-004") {
-      return { ...user, role: "INTERN" as const };
+      return { ...withLoginId, role: "INTERN" as const };
     }
     return {
-      ...user,
+      ...withLoginId,
       role: legacyRole === "ADMIN" ? "OWNER" as const : legacyRole === "STUDENT" ? "INTERN" as const : user.role,
     };
   });
   const existingIds = new Set(normalized.map((user) => user.id));
   const missingDemoUsers = seedData.users.filter((user) => !existingIds.has(user.id));
   return [...normalized, ...missingDemoUsers];
+}
+
+function getDefaultLoginId(email: string, fallback: string) {
+  const candidate = email?.split("@")[0] || fallback;
+  return candidate.toLowerCase().replace(/[^a-z0-9._-]/g, "") || fallback.toLowerCase();
 }
 
 export const repository: AppRepository = {

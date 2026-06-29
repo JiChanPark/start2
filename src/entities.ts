@@ -4,6 +4,7 @@ export type StudentStatus = "ACTIVE" | "COMPLETED" | "PAUSED";
 
 export interface User {
   id: string;
+  loginId?: string;
   email: string;
   name: string;
   role: Role;
@@ -111,6 +112,7 @@ export interface PresentationFile {
 
 export interface SignupRequest {
   id: string;
+  loginId: string;
   email: string;
   name: string;
   role: Exclude<Role, "OWNER">;

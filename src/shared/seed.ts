@@ -6,12 +6,12 @@ const currentWeek = getSeedWeekRange(today);
 
 export const seedData: AppData = {
   users: [
-    { id: "u-owner", email: "owner@lab.local", name: "박지찬", role: "OWNER" },
-    { id: "u-mentor", email: "mentor@lab.local", name: "오경희", role: "MENTOR" },
-    { id: "u-001", email: "minseo@lab.local", name: "김민서", role: "GRAD_STUDENT" },
-    { id: "u-002", email: "jiho@lab.local", name: "이지호", role: "GRAD_STUDENT" },
-    { id: "u-003", email: "sua@lab.local", name: "박수아", role: "INTERN" },
-    { id: "u-004", email: "hyun@lab.local", name: "최도현", role: "INTERN" },
+    { id: "u-owner", loginId: "owner", email: "owner@lab.local", name: "박지찬", role: "OWNER" },
+    { id: "u-mentor", loginId: "mentor", email: "mentor@lab.local", name: "오경희", role: "MENTOR" },
+    { id: "u-001", loginId: "minseo", email: "minseo@lab.local", name: "김민서", role: "GRAD_STUDENT" },
+    { id: "u-002", loginId: "jiho", email: "jiho@lab.local", name: "이지호", role: "GRAD_STUDENT" },
+    { id: "u-003", loginId: "sua", email: "sua@lab.local", name: "박수아", role: "INTERN" },
+    { id: "u-004", loginId: "hyun", email: "hyun@lab.local", name: "최도현", role: "INTERN" },
   ],
   students: [
     {

@@ -27,6 +27,7 @@ type View = "dashboard" | "mentor-dashboard" | "students" | "student-detail" | "
 
 interface CreateStudentInput {
   name: string;
+  loginId: string;
   email: string;
   role: "GRAD_STUDENT" | "INTERN";
   affiliation: string;
@@ -121,25 +122,34 @@ export function App() {
     setSelectedStudentId(data.students.find((student) => student.userId === user.id)?.id ?? null);
   };
 
-  const login = async (emailOrUserId: string, password?: string) => {
-    const normalizedEmail = emailOrUserId.trim().toLowerCase();
+  const login = async (loginIdOrUserId: string, password?: string) => {
+    const normalizedLoginId = normalizeLoginId(loginIdOrUserId);
     const user =
-      data.users.find((item) => item.id === emailOrUserId) ??
-      data.users.find((item) => item.email.toLowerCase() === normalizedEmail);
+      data.users.find((item) => item.id === loginIdOrUserId) ??
+      data.users.find((item) => getUserLoginId(item) === normalizedLoginId);
 
-    if (!user || !password) return "이메일 또는 비밀번호를 확인해 주세요.";
+    if (!user || !password) return "아이디 또는 비밀번호를 확인해 주세요.";
 
     const passwordHash = await hashPassword(password);
     const isLegacyDemoPassword = !user.passwordHash && password === "demo123";
     if (user.passwordHash !== passwordHash && !isLegacyDemoPassword) {
-      return "이메일 또는 비밀번호를 확인해 주세요.";
+      return "아이디 또는 비밀번호를 확인해 주세요.";
     }
 
     openHomeForUser(user);
   };
 
   const submitSignupRequest = async (input: SignupInput) => {
+    const loginId = normalizeLoginId(input.loginId);
     const email = input.email.trim().toLowerCase();
+    const loginIdError = validateLoginId(loginId);
+    if (loginIdError) return loginIdError;
+    if (data.users.some((user) => getUserLoginId(user) === loginId)) {
+      return "이미 사용 중인 아이디입니다.";
+    }
+    if (data.signupRequests.some((request) => request.loginId === loginId && request.status === "PENDING")) {
+      return "이미 승인 대기 중인 아이디입니다.";
+    }
     if (data.users.some((user) => user.email.toLowerCase() === email)) {
       return "이미 등록된 이메일입니다.";
     }
@@ -149,6 +159,7 @@ export function App() {
 
     const request: SignupRequest = {
       id: "sr-" + crypto.randomUUID(),
+      loginId,
       email,
       name: input.name.trim(),
       role: input.role,
@@ -295,6 +306,7 @@ export function App() {
         ...data.users,
         {
           id: userId,
+          loginId: normalizeLoginId(input.loginId) || getDefaultLoginId(input.email, userId),
           email: input.email,
           name: input.name,
           role: input.role,
@@ -346,6 +358,7 @@ export function App() {
         ...data.users,
         {
           id: userId,
+          loginId: request.loginId,
           email: request.email,
           name: request.name,
           role: request.role,
@@ -388,6 +401,7 @@ export function App() {
 
   const updateMyProfile = (input: {
     name: string;
+    loginId: string;
     email: string;
     affiliation: string;
     major: string;
@@ -396,7 +410,13 @@ export function App() {
     internshipEndDate: string;
   }) => {
     if (!currentUser) return "로그인이 필요합니다.";
+    const loginId = normalizeLoginId(input.loginId);
     const email = input.email.trim().toLowerCase();
+    const loginIdError = validateLoginId(loginId);
+    if (loginIdError) return loginIdError;
+    if (data.users.some((user) => user.id !== currentUser.id && getUserLoginId(user) === loginId)) {
+      return "이미 사용 중인 아이디입니다.";
+    }
     if (!email || !input.name.trim()) return "이름과 이메일을 입력해 주세요.";
     if (data.users.some((user) => user.id !== currentUser.id && user.email.toLowerCase() === email)) {
       return "이미 사용 중인 이메일입니다.";
@@ -404,6 +424,7 @@ export function App() {
 
     const updatedUser: User = {
       ...currentUser,
+      loginId,
       name: input.name.trim(),
       email,
     };
@@ -475,7 +496,7 @@ export function App() {
       ...data,
       users: data.users.map((user) =>
         user.id === student.userId
-          ? { ...user, email: input.email, name: input.name, role: input.role }
+          ? { ...user, loginId: normalizeLoginId(input.loginId) || getUserLoginId(user), email: input.email, name: input.name, role: input.role }
           : user,
       ),
       students: data.students.map((item) =>
@@ -712,6 +733,7 @@ function ProfileSettings({
   currentStudent?: StudentProfile;
   onSaveProfile: (input: {
     name: string;
+    loginId: string;
     email: string;
     affiliation: string;
     major: string;
@@ -723,6 +745,7 @@ function ProfileSettings({
 }) {
   const [profile, setProfile] = useState({
     name: currentUser.name,
+    loginId: getUserLoginId(currentUser),
     email: currentUser.email,
     affiliation: currentStudent?.affiliation ?? "",
     major: currentStudent?.major ?? "",
@@ -786,6 +809,10 @@ function ProfileSettings({
           <label>
             <span>이름</span>
             <input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} />
+          </label>
+          <label>
+            <span>아이디</span>
+            <input value={profile.loginId} onChange={(event) => setProfile({ ...profile, loginId: event.target.value })} placeholder="youngmin" />
           </label>
           <label>
             <span>이메일</span>
@@ -858,18 +885,19 @@ function LoginScreen({
   onSignup,
 }: {
   data: AppData;
-  onLogin: (email: string, password: string) => Promise<string | void>;
+  onLogin: (loginId: string, password: string) => Promise<string | void>;
   onSignup: (input: SignupInput) => Promise<string | void>;
 }) {
   const users = [...data.users].sort((a, b) => getRoleOrder(a.role) - getRoleOrder(b.role));
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState(users[0]?.email ?? "");
+  const [loginId, setLoginId] = useState(users[0] ? getUserLoginId(users[0]) : "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [signup, setSignup] = useState<SignupInput>({
     name: "",
+    loginId: "",
     email: "",
     password: "",
     role: "INTERN",
@@ -886,7 +914,7 @@ function LoginScreen({
     setError("");
     setMessage("");
     try {
-      const result = await onLogin(email, password);
+      const result = await onLogin(loginId, password);
       if (result) setError(result);
     } finally {
       setLoading(false);
@@ -904,7 +932,7 @@ function LoginScreen({
         return;
       }
       setMessage("가입 신청이 접수되었습니다. 관리자가 승인하면 로그인할 수 있습니다.");
-      setSignup({ ...signup, name: "", email: "", password: "", affiliation: "", major: "" });
+      setSignup({ ...signup, name: "", loginId: "", email: "", password: "", affiliation: "", major: "" });
       setMode("login");
     } finally {
       setLoading(false);
@@ -913,6 +941,7 @@ function LoginScreen({
 
   const canSignup = Boolean(
     signup.name.trim() &&
+    signup.loginId.trim() &&
     signup.email.trim() &&
     signup.password.length >= 6 &&
     signup.affiliation.trim() &&
@@ -926,7 +955,7 @@ function LoginScreen({
         <div className="loginCopy">
           <span className="eyebrow">Research Intern Growth Platform</span>
           <h1>가입 신청과 관리자 승인을 거쳐 사용하는 연구 인턴 성장 플랫폼</h1>
-          <p>학생은 이메일과 비밀번호로 가입 신청을 하고, 관리자가 승인하면 역할에 맞는 화면으로 로그인합니다.</p>
+          <p>학생은 영문 이름 기반 아이디와 비밀번호로 가입 신청을 하고, 관리자가 승인하면 역할에 맞는 화면으로 로그인합니다.</p>
         </div>
         <div className="loginBox">
           <div className="authTabs">
@@ -941,11 +970,11 @@ function LoginScreen({
           {mode === "login" ? (
             <>
               <h2>로그인</h2>
-              <p className="loginHelp">관리자가 승인한 계정의 이메일과 비밀번호로 로그인합니다. 기존 데모 계정은 비밀번호 <b>demo123</b>을 사용할 수 있습니다.</p>
+              <p className="loginHelp">관리자가 승인한 계정의 아이디와 비밀번호로 로그인합니다. 기존 데모 계정은 비밀번호 <b>demo123</b>을 사용할 수 있습니다.</p>
               <div className="loginForm">
                 <label>
-                  <span>이메일</span>
-                  <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="owner@lab.local" />
+                  <span>아이디</span>
+                  <input value={loginId} onChange={(event) => setLoginId(event.target.value)} placeholder="owner" />
                 </label>
                 <label>
                   <span>비밀번호</span>
@@ -961,7 +990,7 @@ function LoginScreen({
                 </label>
                 {error && <p className="errorText">{error}</p>}
                 {message && <p className="successText">{message}</p>}
-                <button className="primaryButton" onClick={() => void submitLogin()} disabled={loading || !email.trim() || !password.trim()}>
+                <button className="primaryButton" onClick={() => void submitLogin()} disabled={loading || !loginId.trim() || !password.trim()}>
                   {loading ? "로그인 확인 중" : "로그인"}
                 </button>
               </div>
@@ -970,13 +999,13 @@ function LoginScreen({
                   <button
                     key={user.id}
                     onClick={() => {
-                      setEmail(user.email);
+                      setLoginId(getUserLoginId(user));
                       setPassword(user.passwordHash ? "" : demoPassword);
                       setError("");
                     }}
                   >
                     <span>{user.name}</span>
-                    <small>{getRoleLabel(user.role)} · {user.email}</small>
+                    <small>{getRoleLabel(user.role)} · 아이디 {getUserLoginId(user)}</small>
                   </button>
                 ))}
               </div>
@@ -984,9 +1013,10 @@ function LoginScreen({
           ) : (
             <>
               <h2>가입 신청</h2>
-              <p className="loginHelp">신청 후 관리자가 승인하면 입력한 이메일과 비밀번호로 로그인할 수 있습니다.</p>
+              <p className="loginHelp">신청 후 관리자가 승인하면 입력한 아이디와 비밀번호로 로그인할 수 있습니다.</p>
               <div className="signupForm">
                 <input placeholder="이름" value={signup.name} onChange={(event) => setSignup({ ...signup, name: event.target.value })} />
+                <input placeholder="영문 이름 / 로그인 아이디 예: jiminpark" value={signup.loginId} onChange={(event) => setSignup({ ...signup, loginId: event.target.value })} />
                 <input placeholder="이메일" value={signup.email} onChange={(event) => setSignup({ ...signup, email: event.target.value })} />
                 <input type="password" placeholder="비밀번호 6자 이상" value={signup.password} onChange={(event) => setSignup({ ...signup, password: event.target.value })} />
                 <select value={signup.role} onChange={(event) => setSignup({ ...signup, role: event.target.value as SignupInput["role"] })}>
@@ -1263,7 +1293,7 @@ function SignupApprovalPanel({
             <article className="signupRequestCard" key={request.id}>
               <div>
                 <strong>{request.name}</strong>
-                <span>{getRoleLabel(request.role)} · {request.email}</span>
+                <span>{getRoleLabel(request.role)} · 아이디 {request.loginId} · {request.email}</span>
                 <small>{request.affiliation} · {request.major} · 멘토 {request.mentorName}</small>
               </div>
               <div className="studentActionGroup">
@@ -1402,6 +1432,7 @@ function StudentList({
 }) {
   const emptyForm: CreateStudentInput = {
     name: "",
+    loginId: "",
     email: "",
     role: "INTERN",
     affiliation: "",
@@ -1421,6 +1452,7 @@ function StudentList({
     setEditingStudentId(student.id);
     setEditForm({
       name: user.name,
+      loginId: getUserLoginId(user),
       email: user.email,
       role: user.role === "GRAD_STUDENT" ? "GRAD_STUDENT" : "INTERN",
       affiliation: student.affiliation,
@@ -2461,6 +2493,26 @@ function readFileAsDataUrl(file: File) {
 function formatFileSize(size: number) {
   if (size < 1024 * 1024) return `${Math.round(size / 1024)}KB`;
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function getUserLoginId(user: User) {
+  return user.loginId || getDefaultLoginId(user.email, user.id);
+}
+
+function getDefaultLoginId(email: string, fallback: string) {
+  const candidate = email?.split("@")[0] || fallback;
+  return normalizeLoginId(candidate) || fallback.toLowerCase();
+}
+
+function normalizeLoginId(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+}
+
+function validateLoginId(loginId: string) {
+  if (loginId.length < 3) return "아이디는 영문 기준 3자 이상이어야 합니다.";
+  if (loginId.length > 30) return "아이디는 30자 이하로 입력해 주세요.";
+  if (!/^[a-z]/.test(loginId)) return "아이디는 영문자로 시작해야 합니다.";
+  if (!/^[a-z0-9._-]+$/.test(loginId)) return "아이디는 영문, 숫자, 점, 밑줄, 하이픈만 사용할 수 있습니다.";
 }
 
 async function hashPassword(password: string) {
