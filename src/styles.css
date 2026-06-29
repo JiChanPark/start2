@@ -1954,3 +1954,42 @@ button {
     flex-direction: column;
   }
 }
+
+.profileSettingsPanel {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(239, 247, 242, 0.88)),
+    radial-gradient(circle at top right, rgba(47, 105, 87, 0.12), transparent 34%);
+}
+
+.profileSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+
+.profileSettingsGrid label {
+  display: grid;
+  gap: 7px;
+}
+
+.profileSettingsGrid span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.profileSettingsGrid input {
+  width: 100%;
+}
+
+.sidebarFooter .ghostButton.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .profileSettingsGrid {
+    grid-template-columns: 1fr;
+  }
+}

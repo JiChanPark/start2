@@ -23,7 +23,7 @@ import { cloudRepository } from "../shared/cloudStorage";
 import { formatDate, todayKey } from "../shared/date";
 import { repository } from "../shared/storage";
 
-type View = "dashboard" | "mentor-dashboard" | "students" | "student-detail" | "student-home" | "reflection" | "weekly-report" | "history";
+type View = "dashboard" | "mentor-dashboard" | "students" | "student-detail" | "student-home" | "reflection" | "weekly-report" | "history" | "profile";
 
 interface CreateStudentInput {
   name: string;
@@ -127,12 +127,12 @@ export function App() {
       data.users.find((item) => item.id === emailOrUserId) ??
       data.users.find((item) => item.email.toLowerCase() === normalizedEmail);
 
-    if (!user || !password) return "??? ?? ????? ??? ???.";
+    if (!user || !password) return "이메일 또는 비밀번호를 확인해 주세요.";
 
     const passwordHash = await hashPassword(password);
     const isLegacyDemoPassword = !user.passwordHash && password === "demo123";
     if (user.passwordHash !== passwordHash && !isLegacyDemoPassword) {
-      return "??? ?? ????? ??? ???.";
+      return "이메일 또는 비밀번호를 확인해 주세요.";
     }
 
     openHomeForUser(user);
@@ -141,10 +141,10 @@ export function App() {
   const submitSignupRequest = async (input: SignupInput) => {
     const email = input.email.trim().toLowerCase();
     if (data.users.some((user) => user.email.toLowerCase() === email)) {
-      return "?? ??? ??????.";
+      return "이미 등록된 이메일입니다.";
     }
     if (data.signupRequests.some((request) => request.email.toLowerCase() === email && request.status === "PENDING")) {
-      return "?? ?? ?? ?? ?? ??? ????.";
+      return "이미 승인 대기 중인 가입 신청이 있습니다.";
     }
 
     const request: SignupRequest = {
@@ -386,6 +386,87 @@ export function App() {
     });
   };
 
+  const updateMyProfile = (input: {
+    name: string;
+    email: string;
+    affiliation: string;
+    major: string;
+    mentorName: string;
+    internshipStartDate: string;
+    internshipEndDate: string;
+  }) => {
+    if (!currentUser) return "로그인이 필요합니다.";
+    const email = input.email.trim().toLowerCase();
+    if (!email || !input.name.trim()) return "이름과 이메일을 입력해 주세요.";
+    if (data.users.some((user) => user.id !== currentUser.id && user.email.toLowerCase() === email)) {
+      return "이미 사용 중인 이메일입니다.";
+    }
+
+    const updatedUser: User = {
+      ...currentUser,
+      name: input.name.trim(),
+      email,
+    };
+    const existingStudent = data.students.find((student) => student.userId === currentUser.id);
+    const shouldHaveStudentProfile = currentUser.role === "GRAD_STUDENT" || currentUser.role === "INTERN";
+    const nextStudents = existingStudent
+      ? data.students.map((student) =>
+          student.id === existingStudent.id
+            ? {
+                ...student,
+                affiliation: input.affiliation.trim(),
+                major: input.major.trim(),
+                mentorName: input.mentorName.trim(),
+                internshipStartDate: input.internshipStartDate,
+                internshipEndDate: input.internshipEndDate,
+              }
+            : student,
+        )
+      : shouldHaveStudentProfile
+        ? [
+            ...data.students,
+            {
+              id: `s-${crypto.randomUUID()}`,
+              userId: currentUser.id,
+              affiliation: input.affiliation.trim(),
+              major: input.major.trim(),
+              mentorName: input.mentorName.trim(),
+              internshipStartDate: input.internshipStartDate,
+              internshipEndDate: input.internshipEndDate,
+              status: "ACTIVE" as const,
+            },
+          ]
+        : data.students;
+
+    commitData({
+      ...data,
+      users: data.users.map((user) => (user.id === currentUser.id ? updatedUser : user)),
+      students: nextStudents,
+    });
+    setCurrentUser(updatedUser);
+  };
+
+  const changeMyPassword = async (currentPassword: string, nextPassword: string) => {
+    if (!currentUser) return "로그인이 필요합니다.";
+    if (nextPassword.length < 6) return "새 비밀번호는 6자 이상이어야 합니다.";
+
+    const passwordHash = await hashPassword(currentPassword);
+    const isLegacyDemoPassword = !currentUser.passwordHash && currentPassword === "demo123";
+    if (currentUser.passwordHash !== passwordHash && !isLegacyDemoPassword) {
+      return "현재 비밀번호가 맞지 않습니다.";
+    }
+
+    const updatedUser = {
+      ...currentUser,
+      passwordHash: await hashPassword(nextPassword),
+    };
+    commitData({
+      ...data,
+      users: data.users.map((user) => (user.id === currentUser.id ? updatedUser : user)),
+    });
+    setCurrentUser(updatedUser);
+  };
+
   const updateStudent = (studentId: string, input: UpdateStudentInput) => {
     const student = data.students.find((item) => item.id === studentId);
     if (!student) return;
@@ -512,6 +593,9 @@ export function App() {
         </nav>
 
         <div className="sidebarFooter">
+          <button className={view === "profile" ? "ghostButton active" : "ghostButton"} onClick={() => setView("profile")}>
+            <Users size={16} /> 내 프로필
+          </button>
           <button className="ghostButton" onClick={logout}>
             <LogOut size={16} /> 로그아웃
           </button>
@@ -601,8 +685,169 @@ export function App() {
           <WeeklyReportEditor data={data} student={currentStudent} onSave={saveWeeklyReport} />
         )}
         {isStudentRole && currentStudent && view === "history" && <StudentHistory data={data} student={currentStudent} />}
+        {view === "profile" && currentUser && (
+          <ProfileSettings
+            data={data}
+            currentUser={currentUser}
+            currentStudent={currentStudent}
+            onSaveProfile={updateMyProfile}
+            onChangePassword={changeMyPassword}
+          />
+        )}
       </main>
       {helpOpen && <HelpPanel role={currentUser.role} view={view} onClose={() => setHelpOpen(false)} />}
+    </div>
+  );
+}
+
+function ProfileSettings({
+  data,
+  currentUser,
+  currentStudent,
+  onSaveProfile,
+  onChangePassword,
+}: {
+  data: AppData;
+  currentUser: User;
+  currentStudent?: StudentProfile;
+  onSaveProfile: (input: {
+    name: string;
+    email: string;
+    affiliation: string;
+    major: string;
+    mentorName: string;
+    internshipStartDate: string;
+    internshipEndDate: string;
+  }) => string | void;
+  onChangePassword: (currentPassword: string, nextPassword: string) => Promise<string | void>;
+}) {
+  const [profile, setProfile] = useState({
+    name: currentUser.name,
+    email: currentUser.email,
+    affiliation: currentStudent?.affiliation ?? "",
+    major: currentStudent?.major ?? "",
+    mentorName: currentStudent?.mentorName ?? "오경희",
+    internshipStartDate: currentStudent?.internshipStartDate ?? today,
+    internshipEndDate: currentStudent?.internshipEndDate ?? today,
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    nextPassword: "",
+    confirmPassword: "",
+  });
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const isStudentProfile = currentUser.role === "GRAD_STUDENT" || currentUser.role === "INTERN";
+  const linkedStudent = data.students.find((student) => student.userId === currentUser.id);
+
+  const saveProfile = () => {
+    setProfileError("");
+    setProfileMessage("");
+    const result = onSaveProfile(profile);
+    if (result) {
+      setProfileError(result);
+      return;
+    }
+    setProfileMessage("프로필이 저장되었습니다.");
+  };
+
+  const changePassword = async () => {
+    setPasswordError("");
+    setPasswordMessage("");
+    if (passwordForm.nextPassword !== passwordForm.confirmPassword) {
+      setPasswordError("새 비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+    const result = await onChangePassword(passwordForm.currentPassword, passwordForm.nextPassword);
+    if (result) {
+      setPasswordError(result);
+      return;
+    }
+    setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+    setPasswordMessage("비밀번호가 변경되었습니다. 다음 로그인부터 새 비밀번호를 사용하세요.");
+  };
+
+  return (
+    <div className="stack">
+      <section className="profileHeader">
+        <div>
+          <h2>내 프로필</h2>
+          <p>{getRoleLabel(currentUser.role)} · {currentUser.email}</p>
+        </div>
+        <span className="roleBadge">{linkedStudent ? "학생 프로필 연결됨" : "기본 계정 프로필"}</span>
+      </section>
+
+      <section className="panel profileSettingsPanel">
+        <SectionTitle icon={<Users size={18} />} title="개인 프로필 관리" />
+        <p className="sectionHint">이름, 이메일, 소속 정보를 직접 관리할 수 있습니다. 학생과 학연생은 연구 인턴 프로필 정보도 함께 저장됩니다.</p>
+        <div className="profileSettingsGrid">
+          <label>
+            <span>이름</span>
+            <input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} />
+          </label>
+          <label>
+            <span>이메일</span>
+            <input value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} />
+          </label>
+          {isStudentProfile && (
+            <>
+              <label>
+                <span>소속</span>
+                <input value={profile.affiliation} onChange={(event) => setProfile({ ...profile, affiliation: event.target.value })} />
+              </label>
+              <label>
+                <span>전공/분야</span>
+                <input value={profile.major} onChange={(event) => setProfile({ ...profile, major: event.target.value })} />
+              </label>
+              <label>
+                <span>멘토 이름</span>
+                <input value={profile.mentorName} onChange={(event) => setProfile({ ...profile, mentorName: event.target.value })} />
+              </label>
+              <label>
+                <span>인턴 시작일</span>
+                <input type="date" value={profile.internshipStartDate} onChange={(event) => setProfile({ ...profile, internshipStartDate: event.target.value })} />
+              </label>
+              <label>
+                <span>인턴 종료일</span>
+                <input type="date" value={profile.internshipEndDate} onChange={(event) => setProfile({ ...profile, internshipEndDate: event.target.value })} />
+              </label>
+            </>
+          )}
+        </div>
+        {profileError && <p className="errorText">{profileError}</p>}
+        {profileMessage && <p className="successText">{profileMessage}</p>}
+        <button className="primaryButton" onClick={saveProfile}>프로필 저장</button>
+      </section>
+
+      <section className="panel profileSettingsPanel">
+        <SectionTitle icon={<LogOut size={18} />} title="비밀번호 변경" />
+        <p className="sectionHint">기존 데모 계정은 현재 비밀번호에 demo123을 입력해 새 비밀번호를 설정할 수 있습니다.</p>
+        <div className="profileSettingsGrid">
+          <label>
+            <span>현재 비밀번호</span>
+            <input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} />
+          </label>
+          <label>
+            <span>새 비밀번호</span>
+            <input type="password" value={passwordForm.nextPassword} onChange={(event) => setPasswordForm({ ...passwordForm, nextPassword: event.target.value })} />
+          </label>
+          <label>
+            <span>새 비밀번호 확인</span>
+            <input type="password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} />
+          </label>
+        </div>
+        {passwordError && <p className="errorText">{passwordError}</p>}
+        {passwordMessage && <p className="successText">{passwordMessage}</p>}
+        <button
+          className="primaryButton"
+          disabled={!passwordForm.currentPassword || !passwordForm.nextPassword || !passwordForm.confirmPassword}
+          onClick={() => void changePassword()}
+        >
+          비밀번호 변경
+        </button>
+      </section>
     </div>
   );
 }
@@ -2373,6 +2618,11 @@ function getScreenHelp(view: View) {
       "달력의 점은 미션, 회고, 주간 보고서가 남은 날짜를 뜻합니다.",
       "주간 보고서 타임라인에서 관심사가 어떻게 변했는지 볼 수 있습니다.",
       "멘토 피드백은 다음 활동을 준비할 때 다시 확인하세요.",
+    ],
+    profile: [
+      "이름, 이메일, 소속, 전공 등 본인 프로필 정보를 직접 수정할 수 있습니다.",
+      "비밀번호 변경 후에는 다음 로그인부터 새 비밀번호를 사용하면 됩니다.",
+      "기존 데모 계정은 현재 비밀번호에 demo123을 입력해 개인 비밀번호를 설정할 수 있습니다.",
     ],
   };
 
