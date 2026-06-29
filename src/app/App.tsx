@@ -15,13 +15,14 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { AppData, MeetingNotice, MentorNote, MissionAssignment, Reflection, StudentProfile, User, WeeklyReport } from "../entities";
+import type { AppData, MeetingNotice, MentorNote, Mission, MissionAssignment, Reflection, StudentProfile, User, WeeklyReport } from "../entities";
 import { mockAiTutor } from "../features/ai/mockAiTutor";
 import { cloudRepository } from "../shared/cloudStorage";
 import { formatDate, todayKey } from "../shared/date";
 import { repository } from "../shared/storage";
+import { authClient } from "../shared/supabaseAuth";
 
-type View = "dashboard" | "students" | "student-detail" | "student-home" | "reflection" | "weekly-report" | "history";
+type View = "dashboard" | "mentor-dashboard" | "students" | "student-detail" | "student-home" | "reflection" | "weekly-report" | "history";
 
 interface CreateStudentInput {
   name: string;
@@ -96,14 +97,18 @@ export function App() {
     return () => window.clearTimeout(handle);
   }, [data, cloudSync.enabled, cloudSync.ready]);
 
-  const login = (userId: string) => {
-    const user = data.users.find((item) => item.id === userId);
-    if (!user) return;
-
+  const openHomeForUser = (user: User) => {
     setCurrentUser(user);
-    if (isStaffRole(user.role)) {
+    if (user.role === "OWNER") {
       setView("dashboard");
       setSelectedStudentId(data.students[0]?.id ?? null);
+      return;
+    }
+
+    if (user.role === "MENTOR") {
+      setView("mentor-dashboard");
+      const mentee = getMenteesForMentor(data, user)[0] ?? data.students[0];
+      setSelectedStudentId(mentee?.id ?? null);
       return;
     }
 
@@ -111,8 +116,67 @@ export function App() {
     setSelectedStudentId(data.students.find((student) => student.userId === user.id)?.id ?? null);
   };
 
+  useEffect(() => {
+    if (!authClient.enabled || currentUser) return;
+    const session = authClient.getSession();
+    if (!session) return;
+
+    authClient.loadProfile(session)
+      .then((profile) => {
+        const user = profile ?? data.users.find((item) => item.email.toLowerCase() === session.email.toLowerCase());
+        if (user) openHomeForUser(user);
+      })
+      .catch(() => authClient.clearSession());
+  }, [currentUser, data.users]);
+
+  const login = async (emailOrUserId: string, password?: string) => {
+    const normalizedEmail = emailOrUserId.trim().toLowerCase();
+
+    if (authClient.enabled && password) {
+      try {
+        const session = await authClient.signIn(normalizedEmail, password);
+        const profile = await authClient.loadProfile(session);
+        const user = profile ?? data.users.find((item) => item.email.toLowerCase() === session.email.toLowerCase());
+
+        if (!user) {
+          authClient.clearSession();
+          return "Supabase Auth 로그인은 되었지만 profiles 테이블에서 역할 정보를 찾지 못했습니다.";
+        }
+
+        openHomeForUser(user);
+        return;
+      } catch {
+        return "로그인에 실패했습니다. Supabase Authentication에 계정이 있는지, 비밀번호가 맞는지 확인해 주세요.";
+      }
+    }
+
+    const user =
+      data.users.find((item) => item.id === emailOrUserId) ??
+      data.users.find((item) => item.email.toLowerCase() === normalizedEmail);
+    if (!user || password !== "demo123") return "이메일 또는 비밀번호를 확인해 주세요. 로컬 데모 비밀번호는 demo123입니다.";
+
+    authClient.clearSession();
+    openHomeForUser(user);
+  };
+
+  const logout = () => {
+    authClient.clearSession();
+    setCurrentUser(null);
+    setView("dashboard");
+  };
+
+  const commitData = (nextData: AppData) => {
+    repository.save(nextData);
+    setData(nextData);
+  };
+
   const updateAssignment = (id: string, patch: Partial<MissionAssignment>) => {
-    setData(repository.updateAssignment(id, patch));
+    commitData({
+      ...data,
+      assignments: data.assignments.map((assignment) =>
+        assignment.id === id ? { ...assignment, ...patch } : assignment,
+      ),
+    });
   };
 
   const saveReflection = (reflection: Reflection) => {
@@ -176,6 +240,37 @@ export function App() {
     };
     repository.save(nextData);
     setData(nextData);
+  };
+
+  const createSelfDirectedGoal = (studentId: string, input: { title: string; description: string }) => {
+    const title = input.title.trim();
+    if (!title) return;
+
+    const mission: Mission = {
+      id: `m-self-${crypto.randomUUID()}`,
+      title,
+      description: input.description.trim() || "학생이 직접 수립한 오늘의 자기주도 연구 목표입니다.",
+      category: "자기주도",
+      orderIndex: data.missions.length + 1,
+    };
+    const assignment: MissionAssignment = {
+      id: `a-${crypto.randomUUID()}`,
+      studentId,
+      missionId: mission.id,
+      assignedDate: today,
+      status: "TODO",
+      note: "",
+      selfGoal: title,
+      achievementRate: 0,
+      selfEvaluation: "",
+      createdBy: currentUser?.id,
+    };
+
+    commitData({
+      ...data,
+      missions: [...data.missions, mission],
+      assignments: [assignment, ...data.assignments],
+    });
   };
 
   const createStudent = (input: CreateStudentInput) => {
@@ -298,7 +393,9 @@ export function App() {
     return <LoginScreen data={data} onLogin={login} />;
   }
 
-  const isStaff = isStaffRole(currentUser.role);
+  const isOwner = currentUser.role === "OWNER";
+  const isMentor = currentUser.role === "MENTOR";
+  const isStudentRole = !isOwner && !isMentor;
 
   return (
     <div className="appShell">
@@ -312,13 +409,22 @@ export function App() {
         </div>
 
         <nav className="navList">
-          {isStaff ? (
+          {isOwner ? (
             <>
               <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
-                <BarChart3 size={18} /> 대시보드
+                <BarChart3 size={18} /> 성장 대시보드
               </button>
               <button className={view === "students" || view === "student-detail" ? "active" : ""} onClick={() => setView("students")}>
-                <Users size={18} /> 학생 목록
+                <Users size={18} /> 학생 관리
+              </button>
+            </>
+          ) : isMentor ? (
+            <>
+              <button className={view === "mentor-dashboard" ? "active" : ""} onClick={() => setView("mentor-dashboard")}>
+                <MessageSquareText size={18} /> 멘토 피드백
+              </button>
+              <button className={view === "student-detail" ? "active" : ""} onClick={() => setView("student-detail")}>
+                <Users size={18} /> 담당 학생
               </button>
             </>
           ) : (
@@ -340,10 +446,10 @@ export function App() {
         </nav>
 
         <div className="sidebarFooter">
-          <button className="ghostButton" onClick={() => setCurrentUser(null)}>
+          <button className="ghostButton" onClick={logout}>
             <LogOut size={16} /> 로그아웃
           </button>
-          {isStaff && (
+          {isOwner && (
             <DataPortabilityControls onExport={exportData} onImport={importData} />
           )}
           <span className={cloudSync.enabled && cloudSync.ready ? "cloudBadge connected" : "cloudBadge"}>
@@ -356,7 +462,7 @@ export function App() {
         <header className="topbar">
           <div>
             <p>{formatDate(today)}</p>
-            <h1>{isStaff ? "관리자 화면" : `${currentUser.name}님의 인턴 기록`}</h1>
+            <h1>{isOwner ? "관리자 화면" : isMentor ? "멘토 피드백 화면" : `${currentUser.name}의 인턴 기록`}</h1>
           </div>
           <span className="roleBadge">{getRoleLabel(currentUser.role)}</span>
           <button className="helpButton" onClick={() => setHelpOpen(true)} aria-label="도움말 열기">
@@ -364,7 +470,7 @@ export function App() {
           </button>
         </header>
 
-        {isStaff && view === "dashboard" && (
+        {isOwner && view === "dashboard" && (
           <AdminDashboard
             data={data}
             currentUser={currentUser}
@@ -376,7 +482,18 @@ export function App() {
             }}
           />
         )}
-        {isStaff && view === "students" && (
+
+        {isMentor && view === "mentor-dashboard" && (
+          <MentorDashboard
+            data={data}
+            currentUser={currentUser}
+            onSelect={(id) => {
+              setSelectedStudentId(id);
+              setView("student-detail");
+            }}
+          />
+        )}
+        {isOwner && view === "students" && (
           <StudentList
             data={data}
             onCreateStudent={createStudent}
@@ -388,7 +505,7 @@ export function App() {
             }}
           />
         )}
-        {isStaff && view === "student-detail" && selectedStudent && currentUser && (
+        {(isOwner || isMentor) && view === "student-detail" && selectedStudent && currentUser && (
           <StudentDetail
             data={data}
             student={selectedStudent}
@@ -397,57 +514,64 @@ export function App() {
             onSaveMentorNote={saveMentorNote}
           />
         )}
-        {!isStaff && currentStudent && view === "student-home" && (
+        {isStudentRole && currentStudent && view === "student-home" && (
           <StudentHome
             data={data}
             student={currentStudent}
             currentUser={currentUser}
             onUpdateAssignment={updateAssignment}
+            onCreateSelfDirectedGoal={createSelfDirectedGoal}
             onSaveMeetingNotice={saveMeetingNotice}
             onDeleteMeetingNotice={deleteMeetingNotice}
           />
         )}
-        {!isStaff && currentStudent && view === "reflection" && (
+        {isStudentRole && currentStudent && view === "reflection" && (
           <ReflectionEditor data={data} student={currentStudent} onSave={saveReflection} />
         )}
-        {!isStaff && currentStudent && view === "weekly-report" && (
+        {isStudentRole && currentStudent && view === "weekly-report" && (
           <WeeklyReportEditor data={data} student={currentStudent} onSave={saveWeeklyReport} />
         )}
-        {!isStaff && currentStudent && view === "history" && <StudentHistory data={data} student={currentStudent} />}
+        {isStudentRole && currentStudent && view === "history" && <StudentHistory data={data} student={currentStudent} />}
       </main>
       {helpOpen && <HelpPanel role={currentUser.role} view={view} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
 
-function LoginScreen({ data, onLogin }: { data: AppData; onLogin: (userId: string) => void }) {
+function LoginScreen({ data, onLogin }: { data: AppData; onLogin: (email: string, password: string) => Promise<string | void> }) {
   const users = [...data.users].sort((a, b) => getRoleOrder(a.role) - getRoleOrder(b.role));
   const [email, setEmail] = useState(users[0]?.email ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const demoPassword = "demo123";
 
-  const submitLogin = () => {
-    const user = users.find((item) => item.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user || password !== demoPassword) {
-      setError("이메일 또는 비밀번호를 확인해 주세요. MVP 데모 비밀번호는 demo123입니다.");
-      return;
-    }
+  const submitLogin = async () => {
+    setLoading(true);
     setError("");
-    onLogin(user.id);
+    try {
+      const message = await onLogin(email, password);
+      if (message) setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <main className="loginScreen">
       <section className="loginPanel">
         <div className="loginCopy">
-          <span className="eyebrow">Research Intern Growth MVP</span>
-          <h1>연구 인턴의 성장을 기록하고 피드백하는 교육 플랫폼</h1>
-          <p>미션, 일일 회고, 주간 보고서, 멘토/활용책임자 피드백을 한곳에서 관리합니다.</p>
+          <span className="eyebrow">Research Intern Growth Platform</span>
+          <h1>연구 인턴의 목표, 회고, 피드백을 연결하는 성장 기록 플랫폼</h1>
+          <p>Supabase Auth 기반 실제 로그인으로 역할별 권한을 분리하고, 기록은 공용 DB와 연동할 수 있게 구성했습니다.</p>
         </div>
         <div className="loginBox">
           <h2>로그인</h2>
-          <p className="loginHelp">역할별 권한을 확인할 수 있도록 이메일과 비밀번호 방식으로 바꿨습니다. 데모 비밀번호는 <b>demo123</b>입니다.</p>
+          <p className="loginHelp">
+            {authClient.enabled
+              ? "Supabase Authentication에 등록된 이메일과 비밀번호로 로그인합니다."
+              : <>로컬 데모 모드입니다. 비밀번호는 <b>demo123</b>입니다.</>}
+          </p>
           <div className="loginForm">
             <label>
               <span>이메일</span>
@@ -460,13 +584,15 @@ function LoginScreen({ data, onLogin }: { data: AppData; onLogin: (userId: strin
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") submitLogin();
+                  if (event.key === "Enter") void submitLogin();
                 }}
-                placeholder="demo123"
+                placeholder={authClient.enabled ? "Supabase Auth 비밀번호" : "demo123"}
               />
             </label>
             {error && <p className="errorText">{error}</p>}
-            <button className="primaryButton" onClick={submitLogin}>로그인</button>
+            <button className="primaryButton" onClick={() => void submitLogin()} disabled={loading || !email.trim() || !password.trim()}>
+              {loading ? "로그인 확인 중" : "로그인"}
+            </button>
           </div>
           <div className="accountList compactAccounts">
             {users.map((user) => (
@@ -474,7 +600,7 @@ function LoginScreen({ data, onLogin }: { data: AppData; onLogin: (userId: strin
                 key={user.id}
                 onClick={() => {
                   setEmail(user.email);
-                  setPassword(demoPassword);
+                  setPassword(authClient.enabled ? "" : demoPassword);
                   setError("");
                 }}
               >
@@ -671,6 +797,49 @@ function MeetingNoticePanel({
         )}
       </div>
     </section>
+  );
+}
+
+function MentorDashboard({ data, currentUser, onSelect }: { data: AppData; currentUser: User; onSelect: (id: string) => void }) {
+  const mentees = getMenteesForMentor(data, currentUser);
+  const targetStudents = mentees.length ? mentees : data.students;
+  const todayNotes = data.mentorNotes.filter((note) => note.type === "DAILY_MENTOR" && note.noteDate === today && note.authorId === currentUser.id);
+  const waitingFeedback = targetStudents.filter((student) => !todayNotes.some((note) => note.studentId === student.id));
+  const averageProgress = targetStudents.length
+    ? Math.round(targetStudents.reduce((sum, student) => sum + getProgress(data, student.id).rate, 0) / targetStudents.length)
+    : 0;
+
+  return (
+    <div className="stack">
+      <section className="metricGrid">
+        <Metric title="담당 학생" value={String(targetStudents.length)} />
+        <Metric title="오늘 평균 달성도" value={String(averageProgress) + "%"} />
+        <Metric title="오늘 피드백 대기" value={String(waitingFeedback.length) + "명"} />
+      </section>
+      <section className="panel mentorFocusPanel">
+        <SectionTitle icon={<MessageSquareText size={18} />} title="멘토 일일 피드백 큐" />
+        <p className="sectionHint">학생을 선택하면 오늘 목표, 회고, 주간 보고서를 확인하고 멘토 일일 피드백을 남길 수 있습니다.</p>
+        <div className="studentRows">
+          {targetStudents.map((student) => {
+            const user = getUser(data, student);
+            const progress = getProgress(data, student.id);
+            const reflection = data.reflections.find((item) => item.studentId === student.id && item.reflectionDate === today);
+            const hasTodayNote = todayNotes.some((note) => note.studentId === student.id);
+            return (
+              <button className="studentRow expanded" key={student.id} onClick={() => onSelect(student.id)}>
+                <div>
+                  <strong>{user.name}</strong>
+                  <span>{student.major} · {student.affiliation}</span>
+                  <small>{reflection ? "오늘 질문: " + (reflection.question || "질문 미작성") : "오늘 회고 미작성"}</small>
+                </div>
+                <ProgressBar value={progress.rate} />
+                <span className={hasTodayNote ? "okBadge" : "riskBadge"}>{hasTodayNote ? "피드백 완료" : "피드백 필요"}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -938,6 +1107,7 @@ function StudentDetail({
   const [feedbackWeekStartDate, setFeedbackWeekStartDate] = useState(defaultFeedbackWeek.start);
   const [feedbackWeekEndDate, setFeedbackWeekEndDate] = useState(defaultFeedbackWeek.end);
   const feedbackMode = currentUser.role === "OWNER" ? "WEEKLY_OWNER" : "DAILY_MENTOR";
+  const canManageMissions = currentUser.role === "OWNER";
   const [assignmentDate, setAssignmentDate] = useState(today);
   const [assignmentMissionId, setAssignmentMissionId] = useState(data.missions[0]?.id ?? "");
   const assignedForSelectedDate = data.assignments.filter(
@@ -964,6 +1134,7 @@ function StudentDetail({
         <SectionTitle icon={<ClipboardList size={18} />} title="오늘 목표 달성 현황" />
         <MissionList data={data} assignments={assignments} readonly />
       </section>
+      {canManageMissions && (
       <section className="panel">
         <SectionTitle icon={<ClipboardList size={18} />} title="미션 배정 관리" />
         <div className="assignmentTool">
@@ -994,6 +1165,7 @@ function StudentDetail({
           }) : <p className="empty">선택한 날짜에 배정된 미션이 없습니다.</p>}
         </div>
       </section>
+      )}
       <section className="panel">
         <SectionTitle icon={<MessageSquareText size={18} />} title={feedbackMode === "WEEKLY_OWNER" ? "활용책임자 주간 피드백" : "멘토 일일 피드백"} />
         <div className="noteComposer">
@@ -1090,6 +1262,7 @@ function StudentHome({
   student,
   currentUser,
   onUpdateAssignment,
+  onCreateSelfDirectedGoal,
   onSaveMeetingNotice,
   onDeleteMeetingNotice,
 }: {
@@ -1097,6 +1270,7 @@ function StudentHome({
   student: StudentProfile;
   currentUser: User;
   onUpdateAssignment: (id: string, patch: Partial<MissionAssignment>) => void;
+  onCreateSelfDirectedGoal: (studentId: string, input: { title: string; description: string }) => void;
   onSaveMeetingNotice: (notice: MeetingNotice) => void;
   onDeleteMeetingNotice: (id: string) => void;
 }) {
@@ -1112,9 +1286,38 @@ function StudentHome({
       />
       <section className="panel">
         <SectionTitle icon={<ClipboardList size={18} />} title="오늘의 자기주도 목표" />
-        <p className="sectionHint">오늘 무엇을 해볼지 스스로 목표를 세우고, 마무리할 때 달성도와 자기평가를 남겨 주세요.</p>
+        <p className="sectionHint">인턴 연구자가 오늘 직접 달성할 연구 목표를 만들고, 마무리할 때 달성도와 배운 점을 자기평가합니다.</p>
+        <SelfDirectedGoalCreator studentId={student.id} onCreate={onCreateSelfDirectedGoal} />
         <MissionList data={data} assignments={assignments} onUpdateAssignment={onUpdateAssignment} />
       </section>
+    </div>
+  );
+}
+
+function SelfDirectedGoalCreator({ studentId, onCreate }: { studentId: string; onCreate: (studentId: string, input: { title: string; description: string }) => void }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const canCreate = title.trim().length >= 2;
+
+  return (
+    <div className="selfGoalCreator">
+      <div>
+        <strong>새 목표 만들기</strong>
+        <p>예: 논문 이해하고 아이디어 생각하기, 장비 매뉴얼 핵심 개념 정리하기</p>
+      </div>
+      <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="오늘의 목표 제목" />
+      <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="목표의 배경, 산출물, 확인 방법을 간단히 적어주세요." rows={3} />
+      <button
+        className="primaryButton"
+        disabled={!canCreate}
+        onClick={() => {
+          onCreate(studentId, { title, description });
+          setTitle("");
+          setDescription("");
+        }}
+      >
+        <CheckCircle2 size={16} /> 자기주도 목표 추가
+      </button>
     </div>
   );
 }
@@ -1693,6 +1896,11 @@ function getUser(data: AppData, student: StudentProfile) {
   return data.users.find((user) => user.id === student.userId) ?? data.users[0];
 }
 
+function getMenteesForMentor(data: AppData, mentor: User) {
+  const mentorName = mentor.name.trim().toLowerCase();
+  return data.students.filter((student) => student.mentorName.trim().toLowerCase() === mentorName);
+}
+
 function getTodayAssignments(data: AppData, studentId: string) {
   return data.assignments
     .filter((assignment) => assignment.studentId === studentId && assignment.assignedDate === today)
@@ -1770,6 +1978,11 @@ function getScreenHelp(view: View) {
       "완료율보다 주의 사유를 먼저 보세요.",
       "주간 보고서 없음, 회고 미작성 같은 항목은 피드백이 필요한 신호입니다.",
       "학생 행을 누르면 상세 기록으로 이동합니다.",
+    ],
+    "mentor-dashboard": [
+      "담당 학생의 오늘 목표 달성도와 회고 작성 여부를 먼저 확인하세요.",
+      "피드백 필요 학생을 선택하면 멘토 일일 피드백을 바로 남길 수 있습니다.",
+      "활용책임자 화면과 달리 학생 정보 수정과 미션 배정 관리는 제한됩니다.",
     ],
     students: [
       "학생별 멘토, 시작일, 진행률을 비교해 볼 수 있습니다.",

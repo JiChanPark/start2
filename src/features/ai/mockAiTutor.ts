@@ -16,8 +16,27 @@ export interface AiTutorService {
 
 const scoreText = (value: string, target: number) => value.trim().length >= target;
 
+async function requestAi<T extends object>(payload: T) {
+  const response = await fetch("/api/ai-feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) throw new Error("AI request failed");
+  const result = (await response.json()) as { text?: string };
+  if (!result.text) throw new Error("AI response is empty");
+  return result.text;
+}
+
 export const mockAiTutor: AiTutorService = {
   async generateReflectionFeedback(input) {
+    try {
+      return await requestAi({ type: "reflection", ...input });
+    } catch {
+      // Local fallback keeps the MVP usable before the Vercel OpenAI key is configured.
+    }
+
     const checks = {
       work: scoreText(input.todayWork, 16),
       plan: scoreText(input.tomorrowPlan, 16),
@@ -41,6 +60,12 @@ export const mockAiTutor: AiTutorService = {
     return "보완하면 더 좋은 회고가 됩니다. " + suggestions.join(". ") + ".";
   },
   async summarizeProgress(assignments, reflections) {
+    try {
+      return await requestAi({ type: "summary", assignments, reflections });
+    } catch {
+      // Local fallback keeps the MVP usable before the Vercel OpenAI key is configured.
+    }
+
     const completed = assignments.filter((item) => item.status === "DONE").length;
     const rate = assignments.length ? Math.round((completed / assignments.length) * 100) : 0;
     const latestReflection = reflections[0];

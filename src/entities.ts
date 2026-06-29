@@ -39,6 +39,7 @@ export interface MissionAssignment {
   achievementRate?: number;
   selfEvaluation?: string;
   checkedAt?: string;
+  createdBy?: string;
 }
 
 export interface Reflection {
@@ -104,4 +105,11 @@ export interface AppData {
   mentorNotes: MentorNote[];
   weeklyReports: WeeklyReport[];
   meetingNotices: MeetingNotice[];
+}
+
+export interface AuthSession {
+  accessToken: string;
+  refreshToken?: string;
+  userId: string;
+  email: string;
 }
